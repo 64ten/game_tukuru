@@ -53,6 +53,12 @@ shoot_cooldown = 1000
 # 最後に撃った時間
 last_shot_time = 0
 
+# 敵スポーン間隔
+enemy_spawn_cooldown = 1500
+
+# 最後に敵をスポーンした時間
+last_enemy_spawn_time = 0
+
 # =====================================
 # 敵
 # =====================================
@@ -299,6 +305,20 @@ while running:
                 enemy["x"] += dx * enemy_speed
                 enemy["y"] += dy * enemy_speed
 
+
+        # =====================================
+        # 時間経過で敵スポーン
+        # =====================================
+
+        if current_time - last_enemy_spawn_time > enemy_spawn_cooldown:
+
+            # 最大5体まで
+            if len(enemies) < 5:
+
+                enemies.append(create_enemy())
+
+            last_enemy_spawn_time = current_time
+
         # =====================================
         # 当たり判定
         # =====================================
@@ -323,15 +343,6 @@ while running:
                         bullets.remove(bullet)
 
                     break
-
-        # =====================================
-        # 敵再生成
-        # =====================================
-
-        if len(enemies) == 0:
-
-            for i in range(random.randint(1, 5)):
-                enemies.append(create_enemy())
 
         # =====================================
         # プレイヤー接触判定
