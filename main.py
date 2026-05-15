@@ -164,6 +164,7 @@ while running:
 
             # Game Over中のリスタート
             if game_over:
+                
 
                 if event.key == pygame.K_r:
                     reset_game()
@@ -410,6 +411,14 @@ while running:
     # =====================================
 
     if game_over:
+        # 半透明の黒画面
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+
+        overlay.set_alpha(180)
+
+        overlay.fill(BLACK)
+
+        screen.blit(overlay, (0, 0))
 
         game_over_text = font.render(
             "GAME OVER",
