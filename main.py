@@ -11,7 +11,7 @@ pygame.init()
 WIDTH = 1280
 HEIGHT = 800
 #画面下部経験値バーの幅
-UI_HEIGHT = 80
+UI_HEIGHT = 20
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("My Shooting Game")
@@ -23,6 +23,7 @@ clock = pygame.time.Clock()
 # =====================================
 
 font = pygame.font.SysFont(None, 72)
+small_font = pygame.font.SysFont(None, 24)
 
 # =====================================
 # 色
@@ -36,15 +37,16 @@ RED = (255, 0, 0)
 # プレイヤー
 # =====================================
 
-player_size = 50
-player_speed = 5
+player_size = 30
+player_speed = 4
+
 
 # =====================================
 # 弾
 # =====================================
 
-bullet_width = 15
-bullet_height = 15
+bullet_width = 8
+bullet_height = 8
 bullet_speed = 10
 
 bullets = []
@@ -65,8 +67,8 @@ last_enemy_spawn_time = 0
 # 敵
 # =====================================
 
-enemy_size = 50
-enemy_speed = 2
+enemy_size = 30
+enemy_speed = 1.5
 
 enemies = []
 
@@ -434,17 +436,26 @@ while running:
                     break
 
         # =====================================
-        # プレイヤー接触判定
+        # プレイヤー接触判定（中心距離）
         # =====================================
 
         for enemy in enemies:
 
-            if (
-                player_x < enemy["x"] + enemy_size
-                and player_x + player_size > enemy["x"]
-                and player_y < enemy["y"] + enemy_size
-                and player_y + player_size > enemy["y"]
-            ):
+            # 中心座標
+            player_cx = player_x + player_size / 2
+            player_cy = player_y + player_size / 2
+
+            enemy_cx = enemy["x"] + enemy_size / 2
+            enemy_cy = enemy["y"] + enemy_size / 2
+
+            # 距離
+            dx = player_cx - enemy_cx
+            dy = player_cy - enemy_cy
+
+            distance = (dx ** 2 + dy ** 2) ** 0.5
+
+            # 当たり判定（円）
+            if distance < (player_size / 2 + enemy_size / 2):
 
                 game_over = True
 
@@ -531,13 +542,13 @@ while running:
     )
 
     # レベル表示
-    level_text = font.render(
-        f"Lv {player_level}",
+    level_text = small_font.render(
+        f"Lv {player_level}  {player_exp}/{next_level_exp}",
         True,
         WHITE
     )
 
-    screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 10))
+    screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
 
 
     # =====================================
