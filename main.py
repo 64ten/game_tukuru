@@ -12,6 +12,7 @@ WIDTH = 1280
 HEIGHT = 800
 #画面下部経験値バーの幅
 UI_HEIGHT = 20
+xp_bar_height = 30
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("My Shooting Game")
@@ -22,8 +23,8 @@ clock = pygame.time.Clock()
 # フォント
 # =====================================
 
-font = pygame.font.SysFont(None, 72)
-small_font = pygame.font.SysFont(None, 24)
+font = pygame.font.SysFont("msgothic", 64)
+small_font = pygame.font.SysFont("msgothic", 24)
 
 # =====================================
 # 色
@@ -102,6 +103,12 @@ skills = [
     "bullet_count_up",
     "speed_up"
 ]
+
+skill_names = {
+    "fire_rate_up": "連射速度アップ",
+    "bullet_count_up": "弾数増加",
+    "speed_up": "移動速度アップ"
+}
 
 # =====================================
 # 敵生成関数
@@ -322,8 +329,8 @@ while running:
         if player_y < 0:
             player_y = 0
 
-        if player_y > HEIGHT - player_size:
-            player_y = HEIGHT - player_size
+        if player_y > HEIGHT - player_size - xp_bar_height:
+            player_y = HEIGHT - player_size - xp_bar_height
 
         # =====================================
         # 弾移動
@@ -544,17 +551,28 @@ while running:
             5
         )
 
-    if level_up:
+        if level_up:
 
-        overlay = pygame.Surface((WIDTH, HEIGHT))
-        overlay.set_alpha(200)
-        overlay.fill(BLACK)
-        screen.blit(overlay, (0, 0))
+            overlay = pygame.Surface((WIDTH, HEIGHT))
+            overlay.set_alpha(200)
+            overlay.fill(BLACK)
+            screen.blit(overlay, (0, 0))
 
-        for i, skill in enumerate(skill_choices):
+            title = font.render("レベルアップ！スキルを選択", True, WHITE)
+            screen.blit(title, (WIDTH // 2 - 250, HEIGHT // 2 - 150))
 
-            text = small_font.render(f"{i+1}: {skill}", True, WHITE)
-            screen.blit(text, (400, 200 + i * 50))
+            for i, skill in enumerate(skill_choices):
+
+                text = small_font.render(
+                    f"{i+1}: {skill_names[skill]}",
+                    True,
+                    WHITE
+                )
+
+                screen.blit(
+                    text,
+                    (WIDTH // 2 - 150, HEIGHT // 2 - 50 + i * 60)
+                )
 
     # =====================================
     # 経験値バー
@@ -618,8 +636,11 @@ while running:
             WHITE
         )
 
-        screen.blit(game_over_text, (400, 250))
-        screen.blit(restart_text, (250, 350))
+        game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+        restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+
+        screen.blit(game_over_text, game_over_rect)
+        screen.blit(restart_text, restart_rect)
 
     pygame.display.update()
 
