@@ -40,6 +40,9 @@ RED = (255, 0, 0)
 player_size = 30
 player_speed = 4
 
+level_up = False
+skill_choices = []
+
 
 # =====================================
 # 弾
@@ -89,6 +92,16 @@ next_level_exp = 5
 # =====================================
 
 game_over = False
+
+# =====================================
+# スキル
+# =====================================
+
+skills = [
+    "fire_rate_up",
+    "bullet_count_up",
+    "speed_up"
+]
 
 # =====================================
 # 敵生成関数
@@ -182,7 +195,7 @@ while running:
     # =====================================
     # イベント処理
     # =====================================
-
+    
     for event in pygame.event.get():
 
         if event.type == pygame.QUIT:
@@ -190,18 +203,38 @@ while running:
 
         if event.type == pygame.KEYDOWN:
 
-            # Game Over中のリスタート
-            if game_over:
-                
+            if level_up:
 
-                if event.key == pygame.K_r:
-                    reset_game()
+                if event.key == pygame.K_1:
+                    chosen = skill_choices[0]
+
+                elif event.key == pygame.K_2:
+                    chosen = skill_choices[1]
+
+                elif event.key == pygame.K_3:
+                    chosen = skill_choices[2]
+
+                else:
+                    chosen = None
+
+                if chosen:
+
+                    if chosen == "fire_rate_up":
+                        shoot_cooldown = max(200, shoot_cooldown - 200)
+
+                    elif chosen == "bullet_count_up":
+                        pass
+
+                    elif chosen == "speed_up":
+                        player_speed += 1
+
+                    level_up = False
 
     # =====================================
-    # Game Over中は更新停止
+    # Game Over中とレベルアップ中は更新停止
     # =====================================
 
-    if not game_over:
+    if not game_over and not level_up:
 
         # =====================================
         # キー入力
@@ -381,12 +414,12 @@ while running:
         if player_exp >= next_level_exp:
 
             player_level += 1
-
-            player_exp = player_exp - next_level_exp
-
+            player_exp -= next_level_exp
             next_level_exp = int(next_level_exp * 1.2 + 2)
 
-            print("LEVEL UP!")
+            level_up = True
+
+            skill_choices = random.sample(skills, 3)
 
 
         # =====================================
@@ -510,6 +543,18 @@ while running:
             (int(orb["x"]), int(orb["y"])),
             5
         )
+
+    if level_up:
+
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+        overlay.set_alpha(200)
+        overlay.fill(BLACK)
+        screen.blit(overlay, (0, 0))
+
+        for i, skill in enumerate(skill_choices):
+
+            text = small_font.render(f"{i+1}: {skill}", True, WHITE)
+            screen.blit(text, (400, 200 + i * 50))
 
     # =====================================
     # 経験値バー
