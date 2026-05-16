@@ -24,7 +24,7 @@ clock = pygame.time.Clock()
 # =====================================
 
 font = pygame.font.SysFont("msgothic", 64)
-small_font = pygame.font.SysFont("msgothic", 24)
+small_font = pygame.font.SysFont("msgothic", 20)
 
 # =====================================
 # 色
