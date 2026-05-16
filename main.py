@@ -134,9 +134,21 @@ def reset_game():
     global bullets
     global enemies
     global game_over
+    global player_level
+    global player_exp
+    global next_level_exp
+    global exp_orbs
+
+    # レベル関連リセット
+    player_level = 1
+    player_exp = 0
+    next_level_exp = 5
+
+    # 経験値オーブ削除
+    exp_orbs = []
 
     player_x = WIDTH // 2
-    player_y = HEIGHT - 80
+    player_y = HEIGHT // 2
 
     bullets = []
 
