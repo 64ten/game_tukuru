@@ -219,8 +219,8 @@ while running:
 
             if current_time - last_shot_time > shoot_cooldown:
 
-                bullet_x = player_x + player_size // 2
-                bullet_y = player_y
+                bullet_x = player_x + player_size / 2
+                bullet_y = player_y + player_size / 2
 
                 # 一番近い敵
                 closest_enemy = None
@@ -228,8 +228,8 @@ while running:
 
                 for enemy in enemies:
 
-                    dx = enemy["x"] - bullet_x
-                    dy = enemy["y"] - bullet_y
+                    dx = (enemy["x"] + enemy_size / 2) - bullet_x
+                    dy = (enemy["y"] + enemy_size / 2) - bullet_y
 
                     distance = (dx ** 2 + dy ** 2) ** 0.5
 
@@ -241,8 +241,8 @@ while running:
                 # 敵がいる場合
                 if closest_enemy is not None:
 
-                    dx = closest_enemy["x"] - bullet_x
-                    dy = closest_enemy["y"] - bullet_y
+                    dx = (closest_enemy["x"] + enemy_size / 2) - bullet_x
+                    dy = (closest_enemy["y"] + enemy_size / 2) - bullet_y
 
                     distance = (dx ** 2 + dy ** 2) ** 0.5
 
@@ -347,7 +347,7 @@ while running:
             distance = (dx ** 2 + dy ** 2) ** 0.5
 
             # 近づいたら吸引
-            if distance < 150:
+            if distance < 100:
 
                 if distance != 0:
 
@@ -368,7 +368,7 @@ while running:
 
             distance = (dx ** 2 + dy ** 2) ** 0.5
 
-            if distance < 30:
+            if distance < 20:
 
                 player_exp += orb["value"]
 
@@ -480,15 +480,11 @@ while running:
     # 弾
     for bullet in bullets:
 
-        pygame.draw.rect(
+        pygame.draw.circle(
             screen,
             WHITE,
-            (
-                bullet["x"],
-                bullet["y"],
-                bullet_width,
-                bullet_height
-            )
+            (int(bullet["x"]), int(bullet["y"])),
+            4
         )
 
     # 敵
@@ -512,7 +508,7 @@ while running:
             screen,
             (0, 255, 0),
             (int(orb["x"]), int(orb["y"])),
-            8
+            5
         )
 
     # =====================================
