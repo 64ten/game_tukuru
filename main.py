@@ -69,6 +69,18 @@ enemy_speed = 2
 enemies = []
 
 # =====================================
+# 経験値
+# =====================================
+
+exp_orbs = []
+
+player_level = 1
+
+player_exp = 0
+
+next_level_exp = 5
+
+# =====================================
 # Game Over
 # =====================================
 
@@ -308,6 +320,60 @@ while running:
 
 
         # =====================================
+        # 経験値オーブ吸引
+        # =====================================
+
+        for orb in exp_orbs:
+
+            dx = player_x - orb["x"]
+            dy = player_y - orb["y"]
+
+            distance = (dx ** 2 + dy ** 2) ** 0.5
+
+            # 近づいたら吸引
+            if distance < 150:
+
+                if distance != 0:
+
+                    dx = dx / distance
+                    dy = dy / distance
+
+                    orb["x"] += dx * 5
+                    orb["y"] += dy * 5
+
+        # =====================================
+        # 経験値回収
+        # =====================================
+
+        for orb in exp_orbs[:]:
+
+            dx = player_x - orb["x"]
+            dy = player_y - orb["y"]
+
+            distance = (dx ** 2 + dy ** 2) ** 0.5
+
+            if distance < 30:
+
+                player_exp += orb["value"]
+
+                exp_orbs.remove(orb)
+
+        # =====================================
+        # レベルアップ
+        # =====================================
+
+        if player_exp >= next_level_exp:
+
+            player_level += 1
+
+            player_exp = player_exp - next_level_exp
+
+            next_level_exp += 5
+
+            print("LEVEL UP!")
+
+
+        # =====================================
         # 時間経過で敵スポーン
         # =====================================
 
@@ -337,6 +403,14 @@ while running:
                     and bullet_y > enemy["y"]
                     and bullet_y < enemy["y"] + enemy_size
                 ):
+                    
+
+                    # 経験値オーブ生成
+                    exp_orbs.append({
+                        "x": enemy["x"],
+                        "y": enemy["y"],
+                        "value": 1
+                    })
 
                     enemies.remove(enemy)
 
@@ -405,6 +479,17 @@ while running:
                 enemy_size
             )
         )
+    
+    # 経験値オーブ
+    for orb in exp_orbs:
+
+        pygame.draw.circle(
+            screen,
+            (0, 255, 0),
+            (int(orb["x"]), int(orb["y"])),
+            8
+        )
+
 
     # =====================================
     # GAME OVER表示
