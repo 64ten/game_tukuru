@@ -9,7 +9,9 @@ pygame.init()
 # =====================================
 
 WIDTH = 1280
-HEIGHT = 720
+HEIGHT = 800
+#画面下部経験値バーの幅
+UI_HEIGHT = 80
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("My Shooting Game")
@@ -380,7 +382,7 @@ while running:
 
             player_exp = player_exp - next_level_exp
 
-            next_level_exp += 5
+            next_level_exp = int(next_level_exp * 1.2 + 2)
 
             print("LEVEL UP!")
 
@@ -501,6 +503,41 @@ while running:
             (int(orb["x"]), int(orb["y"])),
             8
         )
+
+    # =====================================
+    # 経験値バー
+    # =====================================
+
+    # 背景バー
+    pygame.draw.rect(
+        screen,
+        (50, 50, 50),
+        (0, HEIGHT - UI_HEIGHT, WIDTH, UI_HEIGHT)
+    )
+
+    # 進捗割合
+    exp_ratio = player_exp / next_level_exp
+
+    # 実際のバー
+    pygame.draw.rect(
+        screen,
+        (0, 200, 0),
+        (
+            0,
+            HEIGHT - UI_HEIGHT,
+            WIDTH * exp_ratio,
+            UI_HEIGHT
+        )
+    )
+
+    # レベル表示
+    level_text = font.render(
+        f"Lv {player_level}",
+        True,
+        WHITE
+    )
+
+    screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 10))
 
 
     # =====================================
