@@ -1,102 +1,24 @@
 import pygame
 import sys
 import random
+import math
 
 pygame.init()
 
 # =====================================
-# 画面設定
+# 設定・定数
 # =====================================
-
 WIDTH = 1280
 HEIGHT = 800
-#画面下部経験値バーの幅
-UI_HEIGHT = 20
-xp_bar_height = 30
-
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("My Shooting Game")
-
-clock = pygame.time.Clock()
-
-# =====================================
-# フォント
-# =====================================
-
-font = pygame.font.SysFont("msgothic", 64)
-small_font = pygame.font.SysFont("msgothic", 20)
-
-# =====================================
-# 色
-# =====================================
+UI_HEIGHT = 25
+XP_BAR_HEIGHT = 30
 
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
-
-# =====================================
-# プレイヤー
-# =====================================
-
-player_size = 30
-player_speed = 4
-
-level_up = False
-skill_choices = []
-
-
-# =====================================
-# 弾
-# =====================================
-
-bullet_width = 8
-bullet_height = 8
-bullet_speed = 10
-
-bullets = []
-
-# 発射クールタイム
-shoot_cooldown = 1000
-
-# 最後に撃った時間
-last_shot_time = 0
-
-# 敵スポーン間隔
-enemy_spawn_cooldown = 1500
-
-# 最後に敵をスポーンした時間
-last_enemy_spawn_time = 0
-
-# =====================================
-# 敵
-# =====================================
-
-enemy_size = 30
-enemy_speed = 1.5
-
-enemies = []
-
-# =====================================
-# 経験値
-# =====================================
-
-exp_orbs = []
-
-player_level = 1
-
-player_exp = 0
-
-next_level_exp = 5
-
-# =====================================
-# Game Over
-# =====================================
-
-game_over = False
-
-# =====================================
-# スキル
-# =====================================
+YELLOW = (255, 255, 0)
+GREEN = (0, 255, 0)
+DARK_GRAY = (50, 50, 50)
 
 skills = [
     "fire_rate_up",
@@ -110,539 +32,322 @@ skill_names = {
     "speed_up": "移動速度アップ"
 }
 
-# =====================================
-# 敵生成関数
-# =====================================
-
-def create_enemy():
-
-    side = random.randint(0, 3)
-
-    # 上
-    if side == 0:
-
-        x = random.randint(0, WIDTH)
-        y = -enemy_size
-
-    # 下
-    elif side == 1:
-
-        x = random.randint(0, WIDTH)
-        y = HEIGHT + enemy_size
-
-    # 左
-    elif side == 2:
-
-        x = -enemy_size
-        y = random.randint(0, HEIGHT)
-
-    # 右
-    else:
-
-        x = WIDTH + enemy_size
-        y = random.randint(0, HEIGHT)
-
-    return {
-        "x": x,
-        "y": y
-    }
+# スクリーン・フォント設定
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("My Shooting Game")
+clock = pygame.time.Clock()
+font = pygame.font.SysFont("msgothic", 64)
+small_font = pygame.font.SysFont("msgothic", 20)
 
 # =====================================
-# リセット関数
+# クラス定義
 # =====================================
 
-def reset_game():
+class Player(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.size = 30
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(WHITE)
+        self.rect = self.image.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        self.speed = 4
+        self.shoot_cooldown = 1000
+        self.last_shot_time = 0
 
-    global player_x
-    global player_y
-    global bullets
-    global enemies
-    global game_over
-    global player_level
-    global player_exp
-    global next_level_exp
-    global exp_orbs
+    def update(self, keys):
+        if keys[pygame.K_LEFT] and self.rect.left > 0:
+            self.rect.x -= self.speed
+        if keys[pygame.K_RIGHT] and self.rect.right < WIDTH:
+            self.rect.x += self.speed
+        if keys[pygame.K_UP] and self.rect.top > 0:
+            self.rect.y -= self.speed
+        if keys[pygame.K_DOWN] and self.rect.bottom < HEIGHT - XP_BAR_HEIGHT:
+            self.rect.y += self.speed
 
-    # レベル関連リセット
-    player_level = 1
-    player_exp = 0
-    next_level_exp = 5
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, dx, dy):
+        super().__init__()
+        self.image = pygame.Surface((8, 8), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, WHITE, (4, 4), 4)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.dx = dx
+        self.dy = dy
+        self.speed = 10
 
-    # 経験値オーブ削除
-    exp_orbs = []
+    def update(self):
+        self.rect.x += self.dx * self.speed
+        self.rect.y += self.dy * self.speed
+        if not screen.get_rect().inflate(200, 200).contains(self.rect):
+            self.kill()
 
-    player_x = WIDTH // 2
-    player_y = HEIGHT // 2
+class EnemyBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, dx, dy):
+        super().__init__()
+        self.image = pygame.Surface((8, 8), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, YELLOW, (4, 4), 4)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.dx = dx
+        self.dy = dy
+        self.speed = 5
 
-    bullets = []
+    def update(self):
+        self.rect.x += self.dx * self.speed
+        self.rect.y += self.dy * self.speed
+        if not screen.get_rect().contains(self.rect):
+            self.kill()
 
-    enemies = []
+class Enemy(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.size = 30
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(RED)
+        
+        side = random.randint(0, 3)
+        if side == 0: # Top
+            x, y = random.randint(0, WIDTH), -self.size
+        elif side == 1: # Bottom
+            x, y = random.randint(0, WIDTH), HEIGHT + self.size
+        elif side == 2: # Left
+            x, y = -self.size, random.randint(0, HEIGHT)
+        else: # Right
+            x, y = WIDTH + self.size, random.randint(0, HEIGHT)
+            
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.speed = 1.5
 
-    for i in range(random.randint(1, 5)):
-        enemies.append(create_enemy())
+    def update(self, player_pos):
+        dx = player_pos[0] - self.rect.centerx
+        dy = player_pos[1] - self.rect.centery
+        dist = math.hypot(dx, dy)
+        if dist != 0:
+            self.rect.x += (dx / dist) * self.speed
+            self.rect.y += (dy / dist) * self.speed
 
-    game_over = False
+class ShootingEnemy(Enemy):
+    def __init__(self):
+        super().__init__()
+        self.image.fill(YELLOW)
+        self.shoot_cooldown = 2000
+        self.last_shot_time = pygame.time.get_ticks() + random.randint(0, 1000)
+
+    def shoot(self, player_pos, enemy_bullets, all_sprites):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_shot_time > self.shoot_cooldown:
+            dx = player_pos[0] - self.rect.centerx
+            dy = player_pos[1] - self.rect.centery
+            dist = math.hypot(dx, dy)
+            if dist != 0:
+                bullet = EnemyBullet(self.rect.centerx, self.rect.centery, dx/dist, dy/dist)
+                enemy_bullets.add(bullet)
+                all_sprites.add(bullet)
+            self.last_shot_time = current_time
+
+class ExpOrb(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((10, 10), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, GREEN, (5, 5), 5)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.value = 1
+
+    def update(self, player_pos):
+        dx = player_pos[0] - self.rect.centerx
+        dy = player_pos[1] - self.rect.centery
+        dist = math.hypot(dx, dy)
+        if dist < 100 and dist != 0:
+            self.rect.x += (dx / dist) * 5
+            self.rect.y += (dy / dist) * 5
 
 # =====================================
-# 初期化
+# ゲーム管理クラス
 # =====================================
 
-reset_game()
+class Game:
+    def __init__(self):
+        self.reset()
 
-# =====================================
-# メインループ
-# =====================================
+    def reset(self):
+        self.player = Player()
+        self.all_sprites = pygame.sprite.Group(self.player)
+        self.bullets = pygame.sprite.Group()
+        self.enemy_bullets = pygame.sprite.Group()
+        self.enemies = pygame.sprite.Group()
+        self.exp_orbs = pygame.sprite.Group()
+        
+        self.level = 1
+        self.exp = 0
+        self.next_level_exp = 5
+        self.game_over = False
+        self.level_up_pending = False
+        self.skill_choices = []
+        self.enemy_spawn_cooldown = 1500
+        self.last_enemy_spawn_time = 0
 
-running = True
+        for _ in range(random.randint(1, 5)):
+            self.spawn_enemy()
 
-while running:
+    def spawn_enemy(self):
+        if random.random() < 0.3:  # 30%の確率で射撃タイプを生成
+            enemy = ShootingEnemy()
+        else:
+            enemy = Enemy()
+        self.enemies.add(enemy)
+        self.all_sprites.add(enemy)
 
-    clock.tick(60)
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN:
+                if self.game_over and event.key == pygame.K_r:
+                    self.reset()
+                elif self.level_up_pending:
+                    if event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
+                        idx = event.key - pygame.K_1
+                        self.apply_skill(self.skill_choices[idx])
+                        self.level_up_pending = False
+        return True
 
-    # =====================================
-    # イベント処理
-    # =====================================
-    
-    for event in pygame.event.get():
+    def apply_skill(self, skill):
+        if skill == "fire_rate_up":
+            self.player.shoot_cooldown = max(200, self.player.shoot_cooldown - 200)
+        elif skill == "speed_up":
+            self.player.speed += 1
+        # bullet_count_up は現状の実装を維持
 
-        if event.type == pygame.QUIT:
-            running = False
-
-        if event.type == pygame.KEYDOWN:
-
-            if level_up:
-
-                if event.key == pygame.K_1:
-                    chosen = skill_choices[0]
-
-                elif event.key == pygame.K_2:
-                    chosen = skill_choices[1]
-
-                elif event.key == pygame.K_3:
-                    chosen = skill_choices[2]
-
-                else:
-                    chosen = None
-
-                if chosen:
-
-                    if chosen == "fire_rate_up":
-                        shoot_cooldown = max(200, shoot_cooldown - 200)
-
-                    elif chosen == "bullet_count_up":
-                        pass
-
-                    elif chosen == "speed_up":
-                        player_speed += 1
-
-                    level_up = False
-
-    # =====================================
-    # Game Over中とレベルアップ中は更新停止
-    # =====================================
-
-    if not game_over and not level_up:
-
-        # =====================================
-        # キー入力
-        # =====================================
+    def update(self):
+        if self.game_over or self.level_up_pending:
+            return
 
         keys = pygame.key.get_pressed()
-
         current_time = pygame.time.get_ticks()
 
-        # =====================================
-        # 射撃
-        # =====================================
+        # プレイヤー更新
+        self.player.update(keys)
 
-        if keys[pygame.K_SPACE]:
+        # 射撃処理
+        if keys[pygame.K_SPACE] and current_time - self.player.last_shot_time > self.player.shoot_cooldown:
+            self.shoot_bullet()
+            self.player.last_shot_time = current_time
 
-            if current_time - last_shot_time > shoot_cooldown:
+        # 敵・弾・経験値オーブ更新
+        self.enemies.update(self.player.rect.center)
+        for enemy in self.enemies:
+            if isinstance(enemy, ShootingEnemy):
+                enemy.shoot(self.player.rect.center, self.enemy_bullets, self.all_sprites)
 
-                bullet_x = player_x + player_size / 2
-                bullet_y = player_y + player_size / 2
+        self.bullets.update()
+        self.enemy_bullets.update()
+        self.exp_orbs.update(self.player.rect.center)
 
-                # 一番近い敵
-                closest_enemy = None
-                closest_distance = 999999
+        # 敵生成
+        if current_time - self.last_enemy_spawn_time > self.enemy_spawn_cooldown:
+            if len(self.enemies) < 5:
+                self.spawn_enemy()
+            self.last_enemy_spawn_time = current_time
 
-                for enemy in enemies:
+        # 衝突判定: 弾 vs 敵
+        hits = pygame.sprite.groupcollide(self.enemies, self.bullets, True, True)
+        for enemy_hit in hits:
+            orb = ExpOrb(enemy_hit.rect.centerx, enemy_hit.rect.centery)
+            self.exp_orbs.add(orb)
+            self.all_sprites.add(orb)
 
-                    dx = (enemy["x"] + enemy_size / 2) - bullet_x
-                    dy = (enemy["y"] + enemy_size / 2) - bullet_y
-
-                    distance = (dx ** 2 + dy ** 2) ** 0.5
-
-                    if distance < closest_distance:
-
-                        closest_distance = distance
-                        closest_enemy = enemy
-
-                # 敵がいる場合
-                if closest_enemy is not None:
-
-                    dx = (closest_enemy["x"] + enemy_size / 2) - bullet_x
-                    dy = (closest_enemy["y"] + enemy_size / 2) - bullet_y
-
-                    distance = (dx ** 2 + dy ** 2) ** 0.5
-
-                    if distance != 0:
-
-                        dx = dx / distance
-                        dy = dy / distance
-
-                        bullets.append({
-                            "x": bullet_x,
-                            "y": bullet_y,
-                            "dx": dx,
-                            "dy": dy
-                        })
-
-                        last_shot_time = current_time
-
-        # =====================================
-        # プレイヤー移動
-        # =====================================
-
-        if keys[pygame.K_LEFT]:
-            player_x -= player_speed
-
-        if keys[pygame.K_RIGHT]:
-            player_x += player_speed
-
-        if keys[pygame.K_UP]:
-            player_y -= player_speed
-
-        if keys[pygame.K_DOWN]:
-            player_y += player_speed
-
-        # =====================================
-        # 画面外制限
-        # =====================================
-
-        if player_x < 0:
-            player_x = 0
-
-        if player_x > WIDTH - player_size:
-            player_x = WIDTH - player_size
-
-        if player_y < 0:
-            player_y = 0
-
-        if player_y > HEIGHT - player_size - xp_bar_height:
-            player_y = HEIGHT - player_size - xp_bar_height
-
-        # =====================================
-        # 弾移動
-        # =====================================
-
-        for bullet in bullets:
-
-            bullet["x"] += bullet["dx"] * bullet_speed
-            bullet["y"] += bullet["dy"] * bullet_speed
-
-        # =====================================
-        # 画面外弾削除
-        # =====================================
-
-        bullets = [
-            bullet for bullet in bullets
-            if (
-                bullet["x"] > -100
-                and bullet["x"] < WIDTH + 100
-                and bullet["y"] > -100
-                and bullet["y"] < HEIGHT + 100
-            )
-        ]
-
-        # =====================================
-        # 敵移動
-        # =====================================
-
-        for enemy in enemies:
-
-            dx = player_x - enemy["x"]
-            dy = player_y - enemy["y"]
-
-            distance = (dx ** 2 + dy ** 2) ** 0.5
-
-            if distance != 0:
-
-                dx = dx / distance
-                dy = dy / distance
-
-                enemy["x"] += dx * enemy_speed
-                enemy["y"] += dy * enemy_speed
-
-
-        # =====================================
-        # 経験値オーブ吸引
-        # =====================================
-
-        for orb in exp_orbs:
-
-            dx = player_x - orb["x"]
-            dy = player_y - orb["y"]
-
-            distance = (dx ** 2 + dy ** 2) ** 0.5
-
-            # 近づいたら吸引
-            if distance < 100:
-
-                if distance != 0:
-
-                    dx = dx / distance
-                    dy = dy / distance
-
-                    orb["x"] += dx * 5
-                    orb["y"] += dy * 5
-
-        # =====================================
         # 経験値回収
-        # =====================================
+        for orb in self.exp_orbs:
+            if self.player.rect.colliderect(orb.rect):
+                self.exp += orb.value
+                orb.kill()
 
-        for orb in exp_orbs[:]:
+        # レベルアップ判定
+        if self.exp >= self.next_level_exp:
+            self.level += 1
+            self.exp -= self.next_level_exp
+            self.next_level_exp = int(self.next_level_exp * 1.2 + 2)
+            self.level_up_pending = True
+            self.skill_choices = random.sample(skills, 3)
 
-            dx = player_x - orb["x"]
-            dy = player_y - orb["y"]
+        # 敗北判定
+        if pygame.sprite.spritecollide(self.player, self.enemies, False, pygame.sprite.collide_circle):
+            self.game_over = True
+            
+        # 敵の弾による敗北判定
+        if pygame.sprite.spritecollide(self.player, self.enemy_bullets, True, pygame.sprite.collide_circle):
+            self.game_over = True
 
-            distance = (dx ** 2 + dy ** 2) ** 0.5
+    def shoot_bullet(self):
+        # 最も近い敵を探す
+        closest_enemy = None
+        min_dist = float('inf')
+        for enemy in self.enemies:
+            dist = math.hypot(enemy.rect.centerx - self.player.rect.centerx, 
+                              enemy.rect.centery - self.player.rect.centery)
+            if dist < min_dist:
+                min_dist = dist
+                closest_enemy = enemy
 
-            if distance < 20:
+        if closest_enemy:
+            dx = closest_enemy.rect.centerx - self.player.rect.centerx
+            dy = closest_enemy.rect.centery - self.player.rect.centery
+            dist = math.hypot(dx, dy)
+            if dist != 0:
+                bullet = Bullet(self.player.rect.centerx, self.player.rect.centery, dx/dist, dy/dist)
+                self.bullets.add(bullet)
+                self.all_sprites.add(bullet)
 
-                player_exp += orb["value"]
+    def draw(self):
+        screen.fill(BLACK)
+        
+        # スプライトの一括描画
+        self.exp_orbs.draw(screen)
+        self.bullets.draw(screen)
+        self.enemy_bullets.draw(screen)
+        self.enemies.draw(screen)
+        screen.blit(self.player.image, self.player.rect)
 
-                exp_orbs.remove(orb)
+        # UI: 経験値バー
+        pygame.draw.rect(screen, DARK_GRAY, (0, HEIGHT - UI_HEIGHT, WIDTH, UI_HEIGHT))
+        exp_ratio = min(1.0, self.exp / self.next_level_exp)
+        pygame.draw.rect(screen, GREEN, (0, HEIGHT - UI_HEIGHT, WIDTH * exp_ratio, UI_HEIGHT))
+        
+        level_text = small_font.render(f"Lv {self.level}  {self.exp}/{self.next_level_exp}", True, WHITE)
+        screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
 
-        # =====================================
-        # レベルアップ
-        # =====================================
+        # レベルアップ画面
+        if self.level_up_pending:
+            self.draw_overlay("レベルアップ！スキルを選択")
+            for i, skill in enumerate(self.skill_choices):
+                text = small_font.render(f"{i+1}: {skill_names[skill]}", True, WHITE)
+                screen.blit(text, (WIDTH // 2 - 150, HEIGHT // 2 - 50 + i * 60))
 
-        if player_exp >= next_level_exp:
+        # ゲームオーバー画面
+        if self.game_over:
+            self.draw_overlay("GAME OVER")
+            restart_text = font.render("PRESS R TO RESTART", True, WHITE)
+            restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+            screen.blit(restart_text, restart_rect)
 
-            player_level += 1
-            player_exp -= next_level_exp
-            next_level_exp = int(next_level_exp * 1.2 + 2)
+        pygame.display.update()
 
-            level_up = True
-
-            skill_choices = random.sample(skills, 3)
-
-
-        # =====================================
-        # 時間経過で敵スポーン
-        # =====================================
-
-        if current_time - last_enemy_spawn_time > enemy_spawn_cooldown:
-
-            # 最大5体まで
-            if len(enemies) < 5:
-
-                enemies.append(create_enemy())
-
-            last_enemy_spawn_time = current_time
-
-        # =====================================
-        # 当たり判定
-        # =====================================
-
-        for bullet in bullets[:]:
-
-            bullet_x = bullet["x"]
-            bullet_y = bullet["y"]
-
-            for enemy in enemies[:]:
-
-                if (
-                    bullet_x > enemy["x"]
-                    and bullet_x < enemy["x"] + enemy_size
-                    and bullet_y > enemy["y"]
-                    and bullet_y < enemy["y"] + enemy_size
-                ):
-                    
-
-                    # 経験値オーブ生成
-                    exp_orbs.append({
-                        "x": enemy["x"],
-                        "y": enemy["y"],
-                        "value": 1
-                    })
-
-                    enemies.remove(enemy)
-
-                    if bullet in bullets:
-                        bullets.remove(bullet)
-
-                    break
-
-        # =====================================
-        # プレイヤー接触判定（中心距離）
-        # =====================================
-
-        for enemy in enemies:
-
-            # 中心座標
-            player_cx = player_x + player_size / 2
-            player_cy = player_y + player_size / 2
-
-            enemy_cx = enemy["x"] + enemy_size / 2
-            enemy_cy = enemy["y"] + enemy_size / 2
-
-            # 距離
-            dx = player_cx - enemy_cx
-            dy = player_cy - enemy_cy
-
-            distance = (dx ** 2 + dy ** 2) ** 0.5
-
-            # 当たり判定（円）
-            if distance < (player_size / 2 + enemy_size / 2):
-
-                game_over = True
-
-    # =====================================
-    # 描画
-    # =====================================
-
-    screen.fill(BLACK)
-
-    # プレイヤー
-    pygame.draw.rect(
-        screen,
-        WHITE,
-        (
-            player_x,
-            player_y,
-            player_size,
-            player_size
-        )
-    )
-
-    # 弾
-    for bullet in bullets:
-
-        pygame.draw.circle(
-            screen,
-            WHITE,
-            (int(bullet["x"]), int(bullet["y"])),
-            4
-        )
-
-    # 敵
-    for enemy in enemies:
-
-        pygame.draw.rect(
-            screen,
-            RED,
-            (
-                enemy["x"],
-                enemy["y"],
-                enemy_size,
-                enemy_size
-            )
-        )
-    
-    # 経験値オーブ
-    for orb in exp_orbs:
-
-        pygame.draw.circle(
-            screen,
-            (0, 255, 0),
-            (int(orb["x"]), int(orb["y"])),
-            5
-        )
-
-        if level_up:
-
-            overlay = pygame.Surface((WIDTH, HEIGHT))
-            overlay.set_alpha(200)
-            overlay.fill(BLACK)
-            screen.blit(overlay, (0, 0))
-
-            title = font.render("レベルアップ！スキルを選択", True, WHITE)
-            screen.blit(title, (WIDTH // 2 - 250, HEIGHT // 2 - 150))
-
-            for i, skill in enumerate(skill_choices):
-
-                text = small_font.render(
-                    f"{i+1}: {skill_names[skill]}",
-                    True,
-                    WHITE
-                )
-
-                screen.blit(
-                    text,
-                    (WIDTH // 2 - 150, HEIGHT // 2 - 50 + i * 60)
-                )
-
-    # =====================================
-    # 経験値バー
-    # =====================================
-
-    # 背景バー
-    pygame.draw.rect(
-        screen,
-        (50, 50, 50),
-        (0, HEIGHT - UI_HEIGHT, WIDTH, UI_HEIGHT)
-    )
-
-    # 進捗割合
-    exp_ratio = player_exp / next_level_exp
-
-    # 実際のバー
-    pygame.draw.rect(
-        screen,
-        (0, 200, 0),
-        (
-            0,
-            HEIGHT - UI_HEIGHT,
-            WIDTH * exp_ratio,
-            UI_HEIGHT
-        )
-    )
-
-    # レベル表示
-    level_text = small_font.render(
-        f"Lv {player_level}  {player_exp}/{next_level_exp}",
-        True,
-        WHITE
-    )
-
-    screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
-
-
-    # =====================================
-    # GAME OVER表示
-    # =====================================
-
-    if game_over:
-        # 半透明の黒画面
-        overlay = pygame.Surface((WIDTH, HEIGHT))
-
-        overlay.set_alpha(180)
-
-        overlay.fill(BLACK)
-
+    def draw_overlay(self, title_str):
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
         screen.blit(overlay, (0, 0))
+        title = font.render(title_str, True, WHITE if not self.game_over else RED)
+        title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+        screen.blit(title, title_rect)
 
-        game_over_text = font.render(
-            "GAME OVER",
-            True,
-            RED
-        )
+def main():
+    game = Game()
+    running = True
+    while running:
+        running = game.handle_events()
+        game.update()
+        game.draw()
+        clock.tick(60)
+    pygame.quit()
+    sys.exit()
 
-        restart_text = font.render(
-            "PRESS R TO RESTART",
-            True,
-            WHITE
-        )
-
-        game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
-        restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
-
-        screen.blit(game_over_text, game_over_rect)
-        screen.blit(restart_text, restart_rect)
-
-    pygame.display.update()
-
-pygame.quit()
-sys.exit()
+if __name__ == "__main__":
+    main()
