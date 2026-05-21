@@ -9,7 +9,7 @@ pygame.init()
 # 設定・定数
 # =====================================
 WIDTH = 1280
-HEIGHT = 800
+HEIGHT = 750
 UI_HEIGHT = 25
 XP_BAR_HEIGHT = 30
 
@@ -17,18 +17,20 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+MAGENTA = (255, 0, 255)
 GREEN = (0, 255, 0)
 DARK_GRAY = (50, 50, 50)
 
 skills = [
     "fire_rate_up",
-    "bullet_count_up",
+    "pierce_bullet",
     "speed_up"
 ]
 
 skill_names = {
     "fire_rate_up": "連射速度アップ",
-    "bullet_count_up": "弾数増加",
+    "pierce_bullet": "貫通弾（5秒毎・威力2倍）",
     "speed_up": "移動速度アップ"
 }
 
@@ -72,12 +74,14 @@ class Bullet(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.dx = dx
         self.dy = dy
-        self.speed = 10
+        self.speed = 8
 
     def update(self):
         self.rect.x += self.dx * self.speed
         self.rect.y += self.dy * self.speed
-        if not screen.get_rect().inflate(200, 200).contains(self.rect):
+        # 画面外に出たら消去
+        if (self.rect.x < -100 or self.rect.x > WIDTH + 100 or 
+            self.rect.y < -100 or self.rect.y > HEIGHT + 100):
             self.kill()
 
 class EnemyBullet(pygame.sprite.Sprite):
@@ -93,7 +97,25 @@ class EnemyBullet(pygame.sprite.Sprite):
     def update(self):
         self.rect.x += self.dx * self.speed
         self.rect.y += self.dy * self.speed
-        if not screen.get_rect().contains(self.rect):
+        if not screen.get_rect().inflate(200, 200).contains(self.rect):
+            self.kill()
+
+class PiercingBullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, dx, dy):
+        super().__init__()
+        self.image = pygame.Surface((12, 12), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, GREEN, (6, 6), 6)
+        pygame.draw.circle(self.image, WHITE, (6, 6), 3) # 中心を白くして強調
+        self.rect = self.image.get_rect(center=(x, y))
+        self.dx = dx
+        self.dy = dy
+        self.speed = 12
+        self.hit_enemies = set() # すでに当たった敵を記録
+
+    def update(self):
+        self.rect.x += self.dx * self.speed
+        self.rect.y += self.dy * self.speed
+        if not screen.get_rect().inflate(200, 200).contains(self.rect):
             self.kill()
 
 class Enemy(pygame.sprite.Sprite):
@@ -102,6 +124,7 @@ class Enemy(pygame.sprite.Sprite):
         self.size = 30
         self.image = pygame.Surface((self.size, self.size))
         self.image.fill(RED)
+        self.hp = 1
         
         side = random.randint(0, 3)
         if side == 0: # Top
@@ -124,6 +147,27 @@ class Enemy(pygame.sprite.Sprite):
             self.rect.x += (dx / dist) * self.speed
             self.rect.y += (dy / dist) * self.speed
 
+class HeavyEnemy(Enemy):
+    def __init__(self):
+        super().__init__()
+        self.size = 40 # 赤色のザコより少し大きく
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(ORANGE)
+        
+        side = random.randint(0, 3)
+        if side == 0: # Top
+            x, y = random.randint(0, WIDTH), -self.size
+        elif side == 1: # Bottom
+            x, y = random.randint(0, WIDTH), HEIGHT + self.size
+        elif side == 2: # Left
+            x, y = -self.size, random.randint(0, HEIGHT)
+        else: # Right
+            x, y = WIDTH + self.size, random.randint(0, HEIGHT)
+            
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.hp = 3 # 赤色のザコの3倍
+        self.speed = 1.2 # 赤色より若干遅く
+
 class ShootingEnemy(Enemy):
     def __init__(self):
         super().__init__()
@@ -139,6 +183,57 @@ class ShootingEnemy(Enemy):
             dist = math.hypot(dx, dy)
             if dist != 0:
                 bullet = EnemyBullet(self.rect.centerx, self.rect.centery, dx/dist, dy/dist)
+                enemy_bullets.add(bullet)
+                all_sprites.add(bullet)
+            self.last_shot_time = current_time
+
+class MidBoss(ShootingEnemy):
+    def __init__(self):
+        super().__init__()
+        self.size = 80
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(YELLOW)
+        pygame.draw.rect(self.image, WHITE, self.image.get_rect(), 4)
+        self.rect = self.image.get_rect(center=(WIDTH//2, -self.size))
+        self.hp = 20
+        self.max_hp = 20
+        self.speed = 0.8
+        self.shoot_cooldown = 1200
+
+class BigBoss(Enemy):
+    def __init__(self):
+        super().__init__()
+        self.size = 150
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(MAGENTA)
+        pygame.draw.rect(self.image, WHITE, self.image.get_rect(), 8)
+        self.rect = self.image.get_rect(midbottom=(WIDTH//2, 0)) # 画面のすぐ上に配置
+        self.hp = 100
+        self.max_hp = 100
+        self.speed = 1.2
+        self.shoot_cooldown = 1500
+        self.last_shot_time = pygame.time.get_ticks()
+
+    def update(self, player_pos):
+        # 入場フェーズ：画面内にしっかり入るまで移動
+        if self.rect.top < 50:
+            self.rect.y += 2
+        else:
+            # 戦闘フェーズ：プレイヤーのX座標を追いかける（横移動）
+            dx = player_pos[0] - self.rect.centerx
+            if abs(dx) > 5:
+                self.rect.x += (dx / abs(dx)) * self.speed
+
+    def shoot(self, player_pos, enemy_bullets, all_sprites):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_shot_time > self.shoot_cooldown:
+            # 8方向に弾を発射
+            for i in range(8):
+                angle = math.radians(i * 45)
+                dx = math.cos(angle)
+                dy = math.sin(angle)
+                bullet = EnemyBullet(self.rect.centerx, self.rect.centery, dx, dy)
+                bullet.image.fill(MAGENTA) # ボスの弾は色を変える
                 enemy_bullets.add(bullet)
                 all_sprites.add(bullet)
             self.last_shot_time = current_time
@@ -171,6 +266,7 @@ class Game:
         self.player = Player()
         self.all_sprites = pygame.sprite.Group(self.player)
         self.bullets = pygame.sprite.Group()
+        self.piercing_bullets = pygame.sprite.Group()
         self.enemy_bullets = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
         self.exp_orbs = pygame.sprite.Group()
@@ -178,6 +274,17 @@ class Game:
         self.level = 1
         self.exp = 0
         self.next_level_exp = 5
+
+        # ウェーブ管理の初期化
+        self.current_wave = 1
+        self.wave_duration = 45000  # 45秒
+        self.wave_start_time = pygame.time.get_ticks()
+        self.boss_spawned = False
+
+        # スキル関連の初期化
+        self.has_piercing = False
+        self.last_piercing_time = 0
+
         self.game_over = False
         self.level_up_pending = False
         self.skill_choices = []
@@ -188,10 +295,32 @@ class Game:
             self.spawn_enemy()
 
     def spawn_enemy(self):
-        if random.random() < 0.3:  # 30%の確率で射撃タイプを生成
-            enemy = ShootingEnemy()
-        else:
+        # ボスウェーブの特殊処理
+        if self.current_wave == 5 and not self.boss_spawned:
+            enemy = MidBoss()
+            self.boss_spawned = True
+        elif self.current_wave == 10 and not self.boss_spawned:
+            enemy = BigBoss()
+            self.boss_spawned = True
+        elif self.current_wave in [5, 10]:
+            # ボス戦中は雑魚敵を少なくする
+            if len(self.enemies) > 3: return
             enemy = Enemy()
+        else:
+            # 通常ウェーブ: ウェーブが進むほど特殊な敵の確率を上げる
+            # HeavyEnemyの出現確率をさらに抑制 (3%から開始)
+            heavy_prob = min(0.15, 0.03 + (self.current_wave * 0.01)) 
+            # ShootingEnemyの出現確率
+            shooting_prob = min(0.6, 0.2 + (self.current_wave * 0.05))
+
+            # 確率の合計が1を超えないように調整（ここでは単純に優先順位で処理）
+            r = random.random()
+            if r < heavy_prob:
+                enemy = HeavyEnemy()
+            elif r < heavy_prob + shooting_prob: # HeavyEnemyが出なかった場合、ShootingEnemyのチャンス
+                enemy = ShootingEnemy()
+            else:
+                enemy = Enemy()
         self.enemies.add(enemy)
         self.all_sprites.add(enemy)
 
@@ -214,7 +343,8 @@ class Game:
             self.player.shoot_cooldown = max(200, self.player.shoot_cooldown - 200)
         elif skill == "speed_up":
             self.player.speed += 1
-        # bullet_count_up は現状の実装を維持
+        elif skill == "pierce_bullet":
+            self.has_piercing = True
 
     def update(self):
         if self.game_over or self.level_up_pending:
@@ -226,41 +356,50 @@ class Game:
         # プレイヤー更新
         self.player.update(keys)
 
+        # ウェーブ管理
+        time_in_wave = current_time - self.wave_start_time
+        if time_in_wave > self.wave_duration:
+            self.current_wave += 1
+            self.wave_start_time = current_time
+            self.boss_spawned = False
+
         # 射撃処理
         if keys[pygame.K_SPACE] and current_time - self.player.last_shot_time > self.player.shoot_cooldown:
             self.shoot_bullet()
             self.player.last_shot_time = current_time
 
+        # 貫通弾の自動射撃 (5秒おき)
+        if self.has_piercing and current_time - self.last_piercing_time > 5000:
+            self.shoot_piercing_bullet()
+            self.last_piercing_time = current_time
+
         # 敵・弾・経験値オーブ更新
         self.enemies.update(self.player.rect.center)
         for enemy in self.enemies:
-            if isinstance(enemy, ShootingEnemy):
+            if isinstance(enemy, (ShootingEnemy, BigBoss)): # MidBossはShootingEnemyを継承しているのでここに含まれる
                 enemy.shoot(self.player.rect.center, self.enemy_bullets, self.all_sprites)
 
         self.bullets.update()
+        self.piercing_bullets.update()
         self.enemy_bullets.update()
         self.exp_orbs.update(self.player.rect.center)
 
         # 敵生成
-        if current_time - self.last_enemy_spawn_time > self.enemy_spawn_cooldown:
-            if len(self.enemies) < 5:
+        max_enemies = 10 + (self.current_wave * 3)
+        # ウェーブが進むごとにスポーン間隔を短くする
+        dynamic_spawn_cooldown = max(400, 1500 - (self.current_wave * 100))
+        
+        if current_time - self.last_enemy_spawn_time > dynamic_spawn_cooldown:
+            if len(self.enemies) < max_enemies:
                 self.spawn_enemy()
             self.last_enemy_spawn_time = current_time
 
-        # 衝突判定: 弾 vs 敵
-        hits = pygame.sprite.groupcollide(self.enemies, self.bullets, True, True)
-        for enemy_hit in hits:
-            orb = ExpOrb(enemy_hit.rect.centerx, enemy_hit.rect.centery)
-            self.exp_orbs.add(orb)
-            self.all_sprites.add(orb)
-
-        # 経験値回収
+        # 経験値回収とレベルアップ判定 (メインループへ移動)
         for orb in self.exp_orbs:
             if self.player.rect.colliderect(orb.rect):
                 self.exp += orb.value
                 orb.kill()
 
-        # レベルアップ判定
         if self.exp >= self.next_level_exp:
             self.level += 1
             self.exp -= self.next_level_exp
@@ -268,13 +407,40 @@ class Game:
             self.level_up_pending = True
             self.skill_choices = random.sample(skills, 3)
 
-        # 敗北判定
-        if pygame.sprite.spritecollide(self.player, self.enemies, False, pygame.sprite.collide_circle):
+        # 衝突判定: 弾 vs 敵 (HP制)
+        enemy_hits = pygame.sprite.groupcollide(self.enemies, self.bullets, False, True)
+        for enemy, bullets in enemy_hits.items():
+            enemy.hp -= len(bullets)
+            self.check_enemy_death(enemy)
+
+        # 衝突判定: 貫通弾 vs 敵
+        pierce_hits = pygame.sprite.groupcollide(self.enemies, self.piercing_bullets, False, False)
+        for enemy, p_bullets in pierce_hits.items():
+            for pb in p_bullets:
+                if enemy not in pb.hit_enemies:
+                    enemy.hp -= 2 # 攻撃力2倍
+                    pb.hit_enemies.add(enemy)
+                    self.check_enemy_death(enemy)
+
+        # 敗北判定 (毎フレーム実行するように移動)
+        if pygame.sprite.spritecollideany(self.player, self.enemies):
             self.game_over = True
             
-        # 敵の弾による敗北判定
-        if pygame.sprite.spritecollide(self.player, self.enemy_bullets, True, pygame.sprite.collide_circle):
+        # 敵の弾による敗北
+        if pygame.sprite.spritecollideany(self.player, self.enemy_bullets):
             self.game_over = True
+
+    def check_enemy_death(self, enemy):
+        if enemy.hp <= 0 and enemy.alive():
+            # 経験値オーブの生成（ボスは多めに）
+            orb_count = 5 if isinstance(enemy, MidBoss) else 15 if isinstance(enemy, BigBoss) else 1
+            for _ in range(orb_count):
+                rx = enemy.rect.centerx + random.randint(-20, 20)
+                ry = enemy.rect.centery + random.randint(-20, 20)
+                orb = ExpOrb(rx, ry)
+                self.exp_orbs.add(orb)
+                self.all_sprites.add(orb)
+            enemy.kill()
 
     def shoot_bullet(self):
         # 最も近い敵を探す
@@ -296,14 +462,53 @@ class Game:
                 self.bullets.add(bullet)
                 self.all_sprites.add(bullet)
 
+    def shoot_piercing_bullet(self):
+        closest_enemy = None
+        min_dist = float('inf')
+        for enemy in self.enemies:
+            dist = math.hypot(enemy.rect.centerx - self.player.rect.centerx, 
+                              enemy.rect.centery - self.player.rect.centery)
+            if dist < min_dist:
+                min_dist = dist
+                closest_enemy = enemy
+
+        if closest_enemy:
+            dx = closest_enemy.rect.centerx - self.player.rect.centerx
+            dy = closest_enemy.rect.centery - self.player.rect.centery
+            dist = math.hypot(dx, dy)
+            if dist != 0:
+                p_bullet = PiercingBullet(self.player.rect.centerx, self.player.rect.centery, dx/dist, dy/dist)
+                self.piercing_bullets.add(p_bullet)
+                self.all_sprites.add(p_bullet)
+
     def draw(self):
         screen.fill(BLACK)
         
         # スプライトの一括描画
         self.exp_orbs.draw(screen)
         self.bullets.draw(screen)
+        self.piercing_bullets.draw(screen)
         self.enemy_bullets.draw(screen)
         self.enemies.draw(screen)
+
+        # ボスのHPバー描画
+        for enemy in self.enemies:
+            if isinstance(enemy, MidBoss):
+                hp_ratio = max(0, enemy.hp / enemy.max_hp)
+                pygame.draw.rect(screen, BLACK, (enemy.rect.x, enemy.rect.y - 15, enemy.size, 8))
+                pygame.draw.rect(screen, YELLOW, (enemy.rect.x, enemy.rect.y - 15, int(enemy.size * hp_ratio), 8))
+            
+            elif isinstance(enemy, BigBoss):
+                hp_ratio = max(0, enemy.hp / enemy.max_hp)
+                bar_w, bar_h = 800, 20
+                bar_x = (WIDTH - bar_w) // 2
+                bar_y = 40
+                pygame.draw.rect(screen, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
+                pygame.draw.rect(screen, MAGENTA, (bar_x, bar_y, int(bar_w * hp_ratio), bar_h))
+                pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
+                boss_text = small_font.render("GREAT BOSS", True, WHITE)
+                screen.blit(boss_text, (bar_x, bar_y - 25))
+
         screen.blit(self.player.image, self.player.rect)
 
         # UI: 経験値バー
@@ -312,7 +517,15 @@ class Game:
         pygame.draw.rect(screen, GREEN, (0, HEIGHT - UI_HEIGHT, WIDTH * exp_ratio, UI_HEIGHT))
         
         level_text = small_font.render(f"Lv {self.level}  {self.exp}/{self.next_level_exp}", True, WHITE)
+        wave_text = small_font.render(f"WAVE {self.current_wave}", True, WHITE)
+        
+        # 次のウェーブまでの残り時間
+        remaining_time = max(0, (self.wave_duration - (pygame.time.get_ticks() - self.wave_start_time)) // 1000)
+        timer_text = small_font.render(f"NEXT WAVE: {remaining_time}s", True, WHITE)
+        
         screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
+        screen.blit(wave_text, (WIDTH // 2 - 40, HEIGHT - UI_HEIGHT + 2))
+        screen.blit(timer_text, (WIDTH - 150, HEIGHT - UI_HEIGHT + 2))
 
         # レベルアップ画面
         if self.level_up_pending:
