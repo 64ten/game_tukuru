@@ -210,6 +210,9 @@ class ShootingEnemy(Enemy):
         self.last_shot_time = pygame.time.get_ticks() + random.randint(0, 1000)
 
     def shoot(self, player_pos, enemy_bullets, all_sprites):
+        # 画面外にいるときは射撃しない
+        if not screen.get_rect().collidepoint(self.rect.center):
+            return
         current_time = pygame.time.get_ticks()
         if current_time - self.last_shot_time > self.shoot_cooldown:
             dx = player_pos[0] - self.rect.centerx
@@ -306,6 +309,9 @@ class BigBoss(Enemy):
 
     def shoot(self, player_pos, enemy_bullets, all_sprites):
         current_time = pygame.time.get_ticks()
+        # 画面外にいるときは射撃しない
+        if not screen.get_rect().collidepoint(self.rect.center):
+            return
         if current_time - self.last_shot_time > self.shoot_cooldown:
             # 8方向に弾を発射
             for i in range(8):
@@ -377,12 +383,15 @@ class Game:
 
     def spawn_enemy(self):
         # ボスウェーブの特殊処理
+        is_unique_boss = False
         if self.current_wave == 5 and not self.boss_spawned:
             enemy = RedMidBoss()
             self.boss_spawned = True
+            is_unique_boss = True
         elif self.current_wave == 10 and not self.boss_spawned:
             enemy = BigBoss()
             self.boss_spawned = True
+            is_unique_boss = True
         elif self.current_wave in [5, 10]:
             # ボス戦中は雑魚敵を少なくする
             config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
@@ -403,6 +412,14 @@ class Game:
                 enemy = ShootingEnemy()
             else:
                 enemy = Enemy()
+
+        # プレイヤーとの距離チェック（ユニークなボス以外に適用）
+        if not is_unique_boss:
+            dist = math.hypot(enemy.rect.centerx - self.player.rect.centerx, 
+                              enemy.rect.centery - self.player.rect.centery)
+            if dist < 300: # 300ピクセル以内ならスポーンさせない
+                return
+
         self.enemies.add(enemy)
         self.all_sprites.add(enemy)
 
@@ -621,6 +638,11 @@ class Game:
                     bar_color = RED
                 else:
                     bar_color = ORANGE
+                
+                # 赤色の中ボスが突進準備中の場合、予告線を描画
+                if isinstance(enemy, RedMidBoss) and enemy.state == "PAUSE":
+                    pygame.draw.line(screen, RED, enemy.rect.center, self.player.rect.center, 2)
+
                 pygame.draw.rect(screen, bar_color, (enemy.rect.x, enemy.rect.y - 12, int(enemy.size * hp_ratio), 6))
                 hp_num = small_font.render(f"{enemy.hp}", True, WHITE)
                 screen.blit(hp_num, (enemy.rect.x, enemy.rect.y - 30))
