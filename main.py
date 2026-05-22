@@ -25,14 +25,40 @@ DARK_GRAY = (50, 50, 50)
 skills = [
     "fire_rate_up",
     "pierce_bullet",
-    "speed_up"
+    "speed_up",
+    "barrier",
+    "atk_up",
+    "hp_up",
+    "heal",
+    "exp_range_up"
 ]
 
 skill_names = {
     "fire_rate_up": "連射速度アップ",
-    "pierce_bullet": "貫通弾（5秒毎・威力2倍）",
-    "speed_up": "移動速度アップ"
+    "pierce_bullet": "貫通弾（5秒毎射撃）",
+    "speed_up": "移動速度アップ",
+    "barrier": "一度きりのバリア（重複不可）",
+    "atk_up": "攻撃力アップ (+50%)",
+    "hp_up": "最大HP増加 (+2)",
+    "heal": "HPを大幅回復 (60%)",
+    "exp_range_up": "経験値収集範囲アップ"
 }
+
+# =====================================
+# ウェーブ設定 (出現上限, 出現間隔, 敵の出現重み)
+# =====================================
+WAVE_CONFIG = {
+    1: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 1.0}},
+    2: {"max_enemies": 12, "spawn_interval": 1200, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
+    3: {"max_enemies": 15, "spawn_interval": 1000, "weights": {"Enemy": 0.5, "HeavyEnemy": 0.3, "ShootingEnemy": 0.2}},
+    4: {"max_enemies": 20, "spawn_interval": 800,  "weights": {"Enemy": 0.4, "HeavyEnemy": 0.3, "ShootingEnemy": 0.3}},
+    5: {"max_enemies": 5,  "spawn_interval": 2000, "weights": {"Enemy": 1.0}}, # ボス戦用（ボス以外は少なめ）
+    6: {"max_enemies": 25, "spawn_interval": 700,  "weights": {"Enemy": 0.3, "HeavyEnemy": 0.4, "ShootingEnemy": 0.3}},
+    # 7以降はコード内でデフォルト値を適用
+}
+DEFAULT_WAVE_SETTING = {"max_enemies": 30, "spawn_interval": 600, "weights": {"Enemy": 0.2, "HeavyEnemy": 0.4, "ShootingEnemy": 0.4}}
+
+
 
 # スクリーン・フォント設定
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -55,6 +81,12 @@ class Player(pygame.sprite.Sprite):
         self.speed = 4
         self.shoot_cooldown = 1000
         self.last_shot_time = 0
+        self.hp = 5
+        self.max_hp = 5
+        self.invincible_timer = 0 # 被弾後の無敵時間
+        self.has_barrier = False
+        self.atk_multiplier = 1.0
+        self.pickup_range = 100
 
     def update(self, keys):
         if keys[pygame.K_LEFT] and self.rect.left > 0:
@@ -125,6 +157,7 @@ class Enemy(pygame.sprite.Sprite):
         self.image = pygame.Surface((self.size, self.size))
         self.image.fill(RED)
         self.hp = 1
+        self.max_hp = 1
         
         side = random.randint(0, 3)
         if side == 0: # Top
@@ -166,6 +199,7 @@ class HeavyEnemy(Enemy):
             
         self.rect = self.image.get_rect(topleft=(x, y))
         self.hp = 3 # 赤色のザコの3倍
+        self.max_hp = 3
         self.speed = 1.2 # 赤色より若干遅く
 
 class ShootingEnemy(Enemy):
@@ -199,6 +233,52 @@ class MidBoss(ShootingEnemy):
         self.max_hp = 20
         self.speed = 0.8
         self.shoot_cooldown = 1200
+
+class RedMidBoss(Enemy):
+    def __init__(self):
+        super().__init__()
+        self.size = 80
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(RED)
+        pygame.draw.rect(self.image, WHITE, self.image.get_rect(), 4)
+        self.rect = self.image.get_rect(center=(WIDTH//2, -self.size))
+        self.hp = 30
+        self.max_hp = 30
+        self.speed = 2.0
+        self.charge_speed = 10.0
+        self.state = "APPROACH" # APPROACH, PAUSE, CHARGE
+        self.state_timer = 0
+        self.charge_dir = (0, 0)
+
+    def update(self, player_pos):
+        current_time = pygame.time.get_ticks()
+        
+        if self.state == "APPROACH":
+            dx = player_pos[0] - self.rect.centerx
+            dy = player_pos[1] - self.rect.centery
+            dist = math.hypot(dx, dy)
+            if dist < 250:
+                self.state = "PAUSE"
+                self.state_timer = current_time
+            elif dist != 0:
+                self.rect.x += (dx / dist) * self.speed
+                self.rect.y += (dy / dist) * self.speed
+                
+        elif self.state == "PAUSE":
+            if current_time - self.state_timer > 1000: # 1秒停止
+                self.state = "CHARGE"
+                self.state_timer = current_time
+                dx = player_pos[0] - self.rect.centerx
+                dy = player_pos[1] - self.rect.centery
+                dist = math.hypot(dx, dy)
+                if dist != 0:
+                    self.charge_dir = (dx / dist, dy / dist)
+                    
+        elif self.state == "CHARGE":
+            self.rect.x += self.charge_dir[0] * self.charge_speed
+            self.rect.y += self.charge_dir[1] * self.charge_speed
+            if current_time - self.state_timer > 800: # 0.8秒間突進
+                self.state = "APPROACH"
 
 class BigBoss(Enemy):
     def __init__(self):
@@ -246,11 +326,11 @@ class ExpOrb(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.value = 1
 
-    def update(self, player_pos):
+    def update(self, player_pos, pickup_range):
         dx = player_pos[0] - self.rect.centerx
         dy = player_pos[1] - self.rect.centery
         dist = math.hypot(dx, dy)
-        if dist < 100 and dist != 0:
+        if dist < pickup_range and dist != 0:
             self.rect.x += (dx / dist) * 5
             self.rect.y += (dy / dist) * 5
 
@@ -276,6 +356,7 @@ class Game:
         self.next_level_exp = 5
 
         # ウェーブ管理の初期化
+        self.wave_config = WAVE_CONFIG
         self.current_wave = 1
         self.wave_duration = 45000  # 45秒
         self.wave_start_time = pygame.time.get_ticks()
@@ -297,27 +378,28 @@ class Game:
     def spawn_enemy(self):
         # ボスウェーブの特殊処理
         if self.current_wave == 5 and not self.boss_spawned:
-            enemy = MidBoss()
+            enemy = RedMidBoss()
             self.boss_spawned = True
         elif self.current_wave == 10 and not self.boss_spawned:
             enemy = BigBoss()
             self.boss_spawned = True
         elif self.current_wave in [5, 10]:
             # ボス戦中は雑魚敵を少なくする
-            if len(self.enemies) > 3: return
+            config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
+            if len(self.enemies) > config["max_enemies"]: return
             enemy = Enemy()
         else:
-            # 通常ウェーブ: ウェーブが進むほど特殊な敵の確率を上げる
-            # HeavyEnemyの出現確率をさらに抑制 (3%から開始)
-            heavy_prob = min(0.15, 0.03 + (self.current_wave * 0.01)) 
-            # ShootingEnemyの出現確率
-            shooting_prob = min(0.6, 0.2 + (self.current_wave * 0.05))
+            # 設定データに基づいた重み付き抽選
+            config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
+            weights = config["weights"]
+            enemy_type = random.choices(
+                list(weights.keys()), 
+                weights=list(weights.values())
+            )[0]
 
-            # 確率の合計が1を超えないように調整（ここでは単純に優先順位で処理）
-            r = random.random()
-            if r < heavy_prob:
+            if enemy_type == "HeavyEnemy":
                 enemy = HeavyEnemy()
-            elif r < heavy_prob + shooting_prob: # HeavyEnemyが出なかった場合、ShootingEnemyのチャンス
+            elif enemy_type == "ShootingEnemy":
                 enemy = ShootingEnemy()
             else:
                 enemy = Enemy()
@@ -345,6 +427,17 @@ class Game:
             self.player.speed += 1
         elif skill == "pierce_bullet":
             self.has_piercing = True
+        elif skill == "barrier":
+            self.player.has_barrier = True
+        elif skill == "atk_up":
+            self.player.atk_multiplier += 0.5
+        elif skill == "hp_up":
+            self.player.max_hp += 2
+            self.player.hp += 2
+        elif skill == "heal":
+            self.player.hp = min(self.player.max_hp, self.player.hp + int(self.player.max_hp * 0.6))
+        elif skill == "exp_range_up":
+            self.player.pickup_range += 100
 
     def update(self):
         if self.game_over or self.level_up_pending:
@@ -382,12 +475,12 @@ class Game:
         self.bullets.update()
         self.piercing_bullets.update()
         self.enemy_bullets.update()
-        self.exp_orbs.update(self.player.rect.center)
+        self.exp_orbs.update(self.player.rect.center, self.player.pickup_range)
 
-        # 敵生成
-        max_enemies = 10 + (self.current_wave * 3)
-        # ウェーブが進むごとにスポーン間隔を短くする
-        dynamic_spawn_cooldown = max(400, 1500 - (self.current_wave * 100))
+        # 敵生成 (ウェーブ設定を使用)
+        config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
+        max_enemies = config["max_enemies"]
+        dynamic_spawn_cooldown = config["spawn_interval"]
         
         if current_time - self.last_enemy_spawn_time > dynamic_spawn_cooldown:
             if len(self.enemies) < max_enemies:
@@ -405,12 +498,14 @@ class Game:
             self.exp -= self.next_level_exp
             self.next_level_exp = int(self.next_level_exp * 1.2 + 2)
             self.level_up_pending = True
-            self.skill_choices = random.sample(skills, 3)
+            # バリアを既に持っている場合は選択肢から除外
+            available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
+            self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
 
         # 衝突判定: 弾 vs 敵 (HP制)
         enemy_hits = pygame.sprite.groupcollide(self.enemies, self.bullets, False, True)
         for enemy, bullets in enemy_hits.items():
-            enemy.hp -= len(bullets)
+            enemy.hp -= len(bullets) * self.player.atk_multiplier
             self.check_enemy_death(enemy)
 
         # 衝突判定: 貫通弾 vs 敵
@@ -418,22 +513,32 @@ class Game:
         for enemy, p_bullets in pierce_hits.items():
             for pb in p_bullets:
                 if enemy not in pb.hit_enemies:
-                    enemy.hp -= 2 # 攻撃力2倍
+                    enemy.hp -= 2 * self.player.atk_multiplier # 攻撃力2倍 * 倍率
                     pb.hit_enemies.add(enemy)
                     self.check_enemy_death(enemy)
 
-        # 敗北判定 (毎フレーム実行するように移動)
-        if pygame.sprite.spritecollideany(self.player, self.enemies):
-            self.game_over = True
+        # プレイヤーの被弾判定 (HP制)
+        if current_time > self.player.invincible_timer:
+            hit_enemies = pygame.sprite.spritecollide(self.player, self.enemies, False)
+            hit_bullets = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
             
-        # 敵の弾による敗北
-        if pygame.sprite.spritecollideany(self.player, self.enemy_bullets):
-            self.game_over = True
+            if hit_enemies or hit_bullets:
+                if self.player.has_barrier:
+                    self.player.has_barrier = False
+                    self.player.invincible_timer = current_time + 1000 # 少し無敵
+                    return
+
+                self.player.hp -= 1
+                self.player.invincible_timer = current_time + 1000 # 1秒の無敵
+                
+                # ダメージ時の視覚効果（点滅の代わりに一瞬赤くするなど、ここでは簡易的に）
+                if self.player.hp <= 0:
+                    self.game_over = True
 
     def check_enemy_death(self, enemy):
         if enemy.hp <= 0 and enemy.alive():
             # 経験値オーブの生成（ボスは多めに）
-            orb_count = 5 if isinstance(enemy, MidBoss) else 15 if isinstance(enemy, BigBoss) else 1
+            orb_count = 5 if isinstance(enemy, (MidBoss, RedMidBoss)) else 15 if isinstance(enemy, BigBoss) else 1
             for _ in range(orb_count):
                 rx = enemy.rect.centerx + random.randint(-20, 20)
                 ry = enemy.rect.centery + random.randint(-20, 20)
@@ -493,12 +598,7 @@ class Game:
 
         # ボスのHPバー描画
         for enemy in self.enemies:
-            if isinstance(enemy, MidBoss):
-                hp_ratio = max(0, enemy.hp / enemy.max_hp)
-                pygame.draw.rect(screen, BLACK, (enemy.rect.x, enemy.rect.y - 15, enemy.size, 8))
-                pygame.draw.rect(screen, YELLOW, (enemy.rect.x, enemy.rect.y - 15, int(enemy.size * hp_ratio), 8))
-            
-            elif isinstance(enemy, BigBoss):
+            if isinstance(enemy, BigBoss):
                 hp_ratio = max(0, enemy.hp / enemy.max_hp)
                 bar_w, bar_h = 800, 20
                 bar_x = (WIDTH - bar_w) // 2
@@ -508,8 +608,30 @@ class Game:
                 pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
                 boss_text = small_font.render("GREAT BOSS", True, WHITE)
                 screen.blit(boss_text, (bar_x, bar_y - 25))
+                hp_num = small_font.render(f"{enemy.hp} / {enemy.max_hp}", True, WHITE)
+                screen.blit(hp_num, (bar_x + bar_w - 100, bar_y - 25))
+            
+            elif enemy.max_hp > 1:
+                # 中ボスや耐久力の高い敵（オレンジなど）のHPバー描画
+                hp_ratio = max(0, enemy.hp / enemy.max_hp)
+                pygame.draw.rect(screen, BLACK, (enemy.rect.x, enemy.rect.y - 12, enemy.size, 6))
+                if isinstance(enemy, MidBoss):
+                    bar_color = YELLOW
+                elif isinstance(enemy, RedMidBoss):
+                    bar_color = RED
+                else:
+                    bar_color = ORANGE
+                pygame.draw.rect(screen, bar_color, (enemy.rect.x, enemy.rect.y - 12, int(enemy.size * hp_ratio), 6))
+                hp_num = small_font.render(f"{enemy.hp}", True, WHITE)
+                screen.blit(hp_num, (enemy.rect.x, enemy.rect.y - 30))
 
-        screen.blit(self.player.image, self.player.rect)
+        # プレイヤー描画 (無敵時間は点滅させる)
+        if pygame.time.get_ticks() > self.player.invincible_timer or (pygame.time.get_ticks() // 100) % 2 == 0:
+            screen.blit(self.player.image, self.player.rect)
+            # バリアの視覚効果
+            if self.player.has_barrier:
+                barrier_color = (100, 200, 255, 150) # 水色（半透明っぽく見せるための色）
+                pygame.draw.circle(screen, barrier_color, self.player.rect.center, self.player.size, 2)
 
         # UI: 経験値バー
         pygame.draw.rect(screen, DARK_GRAY, (0, HEIGHT - UI_HEIGHT, WIDTH, UI_HEIGHT))
@@ -517,6 +639,7 @@ class Game:
         pygame.draw.rect(screen, GREEN, (0, HEIGHT - UI_HEIGHT, WIDTH * exp_ratio, UI_HEIGHT))
         
         level_text = small_font.render(f"Lv {self.level}  {self.exp}/{self.next_level_exp}", True, WHITE)
+        player_hp_text = small_font.render(f"HP: {self.player.hp}/{self.player.max_hp}", True, RED if self.player.hp <= 1 else WHITE)
         wave_text = small_font.render(f"WAVE {self.current_wave}", True, WHITE)
         
         # 次のウェーブまでの残り時間
@@ -524,6 +647,7 @@ class Game:
         timer_text = small_font.render(f"NEXT WAVE: {remaining_time}s", True, WHITE)
         
         screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
+        screen.blit(player_hp_text, (150, HEIGHT - UI_HEIGHT + 2))
         screen.blit(wave_text, (WIDTH // 2 - 40, HEIGHT - UI_HEIGHT + 2))
         screen.blit(timer_text, (WIDTH - 150, HEIGHT - UI_HEIGHT + 2))
 
