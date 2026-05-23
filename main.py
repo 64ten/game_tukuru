@@ -776,24 +776,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    def draw_overlay(self, title_str):
-        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        screen.blit(overlay, (0, 0))
-        title = font.render(title_str, True, WHITE if not self.game_over else RED)
-        title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
-        screen.blit(title, title_rect)
-
-def main():
-    game = Game()
-    running = True
-    while running:
-        running = game.handle_events()
-        game.update()
-        game.draw()
-        clock.tick(60)
-    pygame.quit()
-    sys.exit()
-
-if __name__ == "__main__":
-    main()
