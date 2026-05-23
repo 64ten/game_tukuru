@@ -30,7 +30,8 @@ skills = [
     "atk_up",
     "hp_up",
     "heal",
-    "exp_range_up"
+    "exp_range_up",
+    "pierce_knockback"
 ]
 
 skill_names = {
@@ -41,7 +42,8 @@ skill_names = {
     "atk_up": "攻撃力アップ (+50%)",
     "hp_up": "最大HP増加 (+2)",
     "heal": "HPを大幅回復 (60%)",
-    "exp_range_up": "経験値収集範囲アップ"
+    "exp_range_up": "経験値収集範囲アップ",
+    "pierce_knockback": "貫通弾ノックバック強化"
 }
 
 # =====================================
@@ -49,12 +51,13 @@ skill_names = {
 # =====================================
 WAVE_CONFIG = {
     1: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 1.0}},
-    2: {"max_enemies": 12, "spawn_interval": 1200, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
-    3: {"max_enemies": 15, "spawn_interval": 1000, "weights": {"Enemy": 0.5, "HeavyEnemy": 0.3, "ShootingEnemy": 0.2}},
-    4: {"max_enemies": 20, "spawn_interval": 800,  "weights": {"Enemy": 0.4, "HeavyEnemy": 0.3, "ShootingEnemy": 0.3}},
-    5: {"max_enemies": 5,  "spawn_interval": 2000, "weights": {"Enemy": 1.0}}, # ボス戦用（ボス以外は少なめ）
-    6: {"max_enemies": 25, "spawn_interval": 700,  "weights": {"Enemy": 0.3, "HeavyEnemy": 0.4, "ShootingEnemy": 0.3}},
-    # 7以降はコード内でデフォルト値を適用
+    2: {"max_enemies": 10, "spawn_interval": 1400, "weights": {"Enemy": 1.0}},
+    3: {"max_enemies": 12, "spawn_interval": 1300, "weights": {"Enemy": 1.0}},
+    4: {"max_enemies": 15, "spawn_interval": 1200, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
+    5: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
+    6: {"max_enemies": 20, "spawn_interval": 1000, "weights": {"Enemy": 0.4, "HeavyEnemy": 0.3, "ShootingEnemy": 0.3}},
+    7: {"max_enemies": 25, "spawn_interval": 800,  "weights": {"Enemy": 0.3, "HeavyEnemy": 0.4, "ShootingEnemy": 0.3}},
+    # 以降はDEFAULT_WAVE_SETTINGを適用
 }
 DEFAULT_WAVE_SETTING = {"max_enemies": 30, "spawn_interval": 600, "weights": {"Enemy": 0.2, "HeavyEnemy": 0.4, "ShootingEnemy": 0.4}}
 
@@ -293,36 +296,48 @@ class BigBoss(Enemy):
         self.rect = self.image.get_rect(midbottom=(WIDTH//2, 0)) # 画面のすぐ上に配置
         self.hp = 100
         self.max_hp = 100
-        self.speed = 1.2
-        self.shoot_cooldown = 1500
-        self.last_shot_time = pygame.time.get_ticks()
+        self.speed = 1.8
+        self.state = "APPROACH" # APPROACH, PREPARING_AOE, AOE
+        self.aoe_timer = 0
+        self.aoe_range = 350
+        self.charge_duration = 2000 # 2秒溜める
 
     def update(self, player_pos):
-        # 入場フェーズ：画面内にしっかり入るまで移動
+        current_time = pygame.time.get_ticks()
+
+        # 初期入場
         if self.rect.top < 50:
             self.rect.y += 2
-        else:
-            # 戦闘フェーズ：プレイヤーのX座標を追いかける（横移動）
+            return
+
+        dx = player_pos[0] - self.rect.centerx
+        dy = player_pos[1] - self.rect.centery
+        dist = math.hypot(dx, dy)
+
+        if self.state == "APPROACH":
+            # プレイヤーに向かってゆっくりタックル移動
+            if dist != 0:
+                self.rect.x += (dx / dist) * self.speed
+                self.rect.y += (dy / dist) * self.speed
+            
+            # 一定距離内に入ったら範囲攻撃の準備へ
+            if dist < 220:
+                self.state = "PREPARING_AOE"
+                self.aoe_timer = current_time
+
+        elif self.state == "PREPARING_AOE":
+            # 溜め期間中は少しだけプレイヤーの方へ向き直るが移動は制限
             dx = player_pos[0] - self.rect.centerx
             if abs(dx) > 5:
-                self.rect.x += (dx / abs(dx)) * self.speed
-
-    def shoot(self, player_pos, enemy_bullets, all_sprites):
-        current_time = pygame.time.get_ticks()
-        # 画面外にいるときは射撃しない
-        if not screen.get_rect().collidepoint(self.rect.center):
-            return
-        if current_time - self.last_shot_time > self.shoot_cooldown:
-            # 8方向に弾を発射
-            for i in range(8):
-                angle = math.radians(i * 45)
-                dx = math.cos(angle)
-                dy = math.sin(angle)
-                bullet = EnemyBullet(self.rect.centerx, self.rect.centery, dx, dy)
-                bullet.image.fill(MAGENTA) # ボスの弾は色を変える
-                enemy_bullets.add(bullet)
-                all_sprites.add(bullet)
-            self.last_shot_time = current_time
+                self.rect.x += (dx / abs(dx)) * 0.5
+            
+            if current_time - self.aoe_timer > self.charge_duration:
+                self.state = "AOE"
+                self.aoe_timer = current_time
+        
+        elif self.state == "AOE":
+            if current_time - self.aoe_timer > 600: # 攻撃判定の持続時間
+                self.state = "APPROACH"
 
 class ExpOrb(pygame.sprite.Sprite):
     def __init__(self, x, y):
@@ -369,8 +384,9 @@ class Game:
         self.boss_spawned = False
 
         # スキル関連の初期化
-        self.has_piercing = False
+        self.piercing_count = 0
         self.last_piercing_time = 0
+        self.has_pierce_knockback = False
 
         self.game_over = False
         self.level_up_pending = False
@@ -420,6 +436,11 @@ class Game:
             if dist < 300: # 300ピクセル以内ならスポーンさせない
                 return
 
+        # ウェーブ11以降は体力を倍増
+        if self.current_wave >= 11:
+            enemy.hp *= 2
+            enemy.max_hp *= 2
+
         self.enemies.add(enemy)
         self.all_sprites.add(enemy)
 
@@ -443,7 +464,7 @@ class Game:
         elif skill == "speed_up":
             self.player.speed += 1
         elif skill == "pierce_bullet":
-            self.has_piercing = True
+            self.piercing_count += 1
         elif skill == "barrier":
             self.player.has_barrier = True
         elif skill == "atk_up":
@@ -455,6 +476,8 @@ class Game:
             self.player.hp = min(self.player.max_hp, self.player.hp + int(self.player.max_hp * 0.6))
         elif skill == "exp_range_up":
             self.player.pickup_range += 100
+        elif skill == "pierce_knockback":
+            self.has_pierce_knockback = True
 
     def update(self):
         if self.game_over or self.level_up_pending:
@@ -479,14 +502,14 @@ class Game:
             self.player.last_shot_time = current_time
 
         # 貫通弾の自動射撃 (5秒おき)
-        if self.has_piercing and current_time - self.last_piercing_time > 5000:
+        if self.piercing_count > 0 and current_time - self.last_piercing_time > 5000:
             self.shoot_piercing_bullet()
             self.last_piercing_time = current_time
 
         # 敵・弾・経験値オーブ更新
         self.enemies.update(self.player.rect.center)
         for enemy in self.enemies:
-            if isinstance(enemy, (ShootingEnemy, BigBoss)): # MidBossはShootingEnemyを継承しているのでここに含まれる
+            if isinstance(enemy, ShootingEnemy) and not isinstance(enemy, BigBoss):
                 enemy.shoot(self.player.rect.center, self.enemy_bullets, self.all_sprites)
 
         self.bullets.update()
@@ -515,8 +538,16 @@ class Game:
             self.exp -= self.next_level_exp
             self.next_level_exp = int(self.next_level_exp * 1.2 + 2)
             self.level_up_pending = True
-            # バリアを既に持っている場合は選択肢から除外
+            
+            # スキル抽選のフィルタリング
             available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
+            # 貫通弾ノックバックの出現条件：貫通弾を1つ以上持っていて、まだノックバックを持っていない
+            if self.piercing_count == 0 or self.has_pierce_knockback:
+                available_skills = [s for s in available_skills if s != "pierce_knockback"]
+            # 重複取得不可スキルの除外（必要に応じて追加可能）
+            if self.has_pierce_knockback:
+                available_skills = [s for s in available_skills if s != "pierce_knockback"]
+
             self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
 
         # 衝突判定: 弾 vs 敵 (HP制)
@@ -531,6 +562,11 @@ class Game:
             for pb in p_bullets:
                 if enemy not in pb.hit_enemies:
                     enemy.hp -= 2 * self.player.atk_multiplier # 攻撃力2倍 * 倍率
+                    # ノックバック処理
+                    if self.has_pierce_knockback:
+                        knockback_power = 40
+                        enemy.rect.x += pb.dx * knockback_power
+                        enemy.rect.y += pb.dy * knockback_power
                     pb.hit_enemies.add(enemy)
                     self.check_enemy_death(enemy)
 
@@ -539,17 +575,29 @@ class Game:
             hit_enemies = pygame.sprite.spritecollide(self.player, self.enemies, False)
             hit_bullets = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
             
+            # ウェーブ11以降は被ダメージを倍にする
+            damage_amount = 2 if self.current_wave >= 11 else 1
+
             if hit_enemies or hit_bullets:
                 if self.player.has_barrier:
                     self.player.has_barrier = False
                     self.player.invincible_timer = current_time + 1000 # 少し無敵
                     return
 
-                self.player.hp -= 1
+                self.player.hp -= damage_amount
                 self.player.invincible_timer = current_time + 1000 # 1秒の無敵
                 
                 # ダメージ時の視覚効果（点滅の代わりに一瞬赤くするなど、ここでは簡易的に）
                 if self.player.hp <= 0:
+                    self.game_over = True
+
+        # 大ボスの近接範囲攻撃ダメージ判定
+        for enemy in self.enemies:
+            if isinstance(enemy, BigBoss) and enemy.state == "AOE" and current_time > self.player.invincible_timer:
+                dist = math.hypot(self.player.rect.centerx - enemy.rect.centerx, self.player.rect.centery - enemy.rect.centery)
+                if dist < enemy.aoe_range:
+                    self.player.hp -= (2 if self.current_wave >= 11 else 1)
+                    self.player.invincible_timer = current_time + 1000
                     self.game_over = True
 
     def check_enemy_death(self, enemy):
@@ -598,10 +646,15 @@ class Game:
             dx = closest_enemy.rect.centerx - self.player.rect.centerx
             dy = closest_enemy.rect.centery - self.player.rect.centery
             dist = math.hypot(dx, dy)
+            base_angle = math.atan2(dy, dx)
             if dist != 0:
-                p_bullet = PiercingBullet(self.player.rect.centerx, self.player.rect.centery, dx/dist, dy/dist)
-                self.piercing_bullets.add(p_bullet)
-                self.all_sprites.add(p_bullet)
+                # piercing_countの分だけ、扇状に弾を同時発射
+                for i in range(self.piercing_count):
+                    angle_offset = math.radians((i - (self.piercing_count - 1) / 2) * 15) # 15度ずつずらす
+                    p_bullet = PiercingBullet(self.player.rect.centerx, self.player.rect.centery, 
+                                             math.cos(base_angle + angle_offset), math.sin(base_angle + angle_offset))
+                    self.piercing_bullets.add(p_bullet)
+                    self.all_sprites.add(p_bullet)
 
     def draw(self):
         screen.fill(BLACK)
@@ -627,6 +680,19 @@ class Game:
                 screen.blit(boss_text, (bar_x, bar_y - 25))
                 hp_num = small_font.render(f"{enemy.hp} / {enemy.max_hp}", True, WHITE)
                 screen.blit(hp_num, (bar_x + bar_w - 100, bar_y - 25))
+                
+                # 近接攻撃の予兆描画
+                if enemy.state == "PREPARING_AOE":
+                    # 赤い円で範囲を表示（点滅させる）
+                    if (pygame.time.get_ticks() // 200) % 2 == 0:
+                        pygame.draw.circle(screen, RED, enemy.rect.center, enemy.aoe_range, 3)
+                    # 溜めの進捗に合わせて円の太さを変えるなどの演出
+                    progress = (pygame.time.get_ticks() - enemy.aoe_timer) / enemy.charge_duration
+                    pygame.draw.circle(screen, RED, enemy.rect.center, int(enemy.aoe_range * progress), 1)
+                
+                # 攻撃瞬間のエフェクト
+                elif enemy.state == "AOE":
+                    pygame.draw.circle(screen, MAGENTA, enemy.rect.center, enemy.aoe_range, 10)
             
             elif enemy.max_hp > 1:
                 # 中ボスや耐久力の高い敵（オレンジなど）のHPバー描画
@@ -689,6 +755,27 @@ class Game:
 
         pygame.display.update()
 
+    def draw_overlay(self, title_str):
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+        title = font.render(title_str, True, WHITE if not self.game_over else RED)
+        title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+        screen.blit(title, title_rect)
+
+def main():
+    game = Game()
+    running = True
+    while running:
+        running = game.handle_events()
+        game.update()
+        game.draw()
+        clock.tick(60)
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
     def draw_overlay(self, title_str):
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
