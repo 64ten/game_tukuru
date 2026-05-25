@@ -50,10 +50,10 @@ skill_names = {
 # ウェーブ設定 (出現上限, 出現間隔, 敵の出現重み)
 # =====================================
 WAVE_CONFIG = {
-    1: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 1.0}},
-    2: {"max_enemies": 10, "spawn_interval": 1400, "weights": {"Enemy": 1.0}},
-    3: {"max_enemies": 12, "spawn_interval": 1300, "weights": {"Enemy": 1.0}},
-    4: {"max_enemies": 15, "spawn_interval": 1200, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
+    1: {"max_enemies": 12, "spawn_interval": 1200, "weights": {"Enemy": 1.0}},
+    2: {"max_enemies": 15, "spawn_interval": 1100, "weights": {"Enemy": 1.0}},
+    3: {"max_enemies": 18, "spawn_interval": 1000, "weights": {"Enemy": 1.0}},
+    4: {"max_enemies": 22, "spawn_interval": 900,  "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
     5: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
     6: {"max_enemies": 20, "spawn_interval": 1000, "weights": {"Enemy": 0.4, "HeavyEnemy": 0.3, "ShootingEnemy": 0.3}},
     7: {"max_enemies": 25, "spawn_interval": 800,  "weights": {"Enemy": 0.3, "HeavyEnemy": 0.4, "ShootingEnemy": 0.3}},
@@ -436,10 +436,10 @@ class Game:
             if dist < 300: # 300ピクセル以内ならスポーンさせない
                 return
 
-        # ウェーブ11以降は体力を倍増
-        if self.current_wave >= 11:
-            enemy.hp *= 2
-            enemy.max_hp *= 2
+        # ウェーブ5以降、5ウェーブごとに体力を100%ずつ増加（2倍, 4倍, 8倍...と倍々になる）
+        hp_multiplier = 2 ** (self.current_wave // 5)
+        enemy.hp *= hp_multiplier
+        enemy.max_hp *= hp_multiplier
 
         self.enemies.add(enemy)
         self.all_sprites.add(enemy)
@@ -478,6 +478,20 @@ class Game:
             self.player.pickup_range += 100
         elif skill == "pierce_knockback":
             self.has_pierce_knockback = True
+
+    def trigger_skill_selection(self):
+        self.level_up_pending = True
+        
+        # スキル抽選のフィルタリング
+        available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
+        # 貫通弾ノックバックの出現条件：貫通弾を1つ以上持っていて、まだノックバックを持っていない
+        if self.piercing_count == 0 or self.has_pierce_knockback:
+            available_skills = [s for s in available_skills if s != "pierce_knockback"]
+        # 重複取得不可スキルの除外
+        if self.has_pierce_knockback:
+            available_skills = [s for s in available_skills if s != "pierce_knockback"]
+
+        self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
 
     def update(self):
         if self.game_over or self.level_up_pending:
@@ -537,18 +551,7 @@ class Game:
             self.level += 1
             self.exp -= self.next_level_exp
             self.next_level_exp = int(self.next_level_exp * 1.2 + 2)
-            self.level_up_pending = True
-            
-            # スキル抽選のフィルタリング
-            available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
-            # 貫通弾ノックバックの出現条件：貫通弾を1つ以上持っていて、まだノックバックを持っていない
-            if self.piercing_count == 0 or self.has_pierce_knockback:
-                available_skills = [s for s in available_skills if s != "pierce_knockback"]
-            # 重複取得不可スキルの除外（必要に応じて追加可能）
-            if self.has_pierce_knockback:
-                available_skills = [s for s in available_skills if s != "pierce_knockback"]
-
-            self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
+            self.trigger_skill_selection()
 
         # 衝突判定: 弾 vs 敵 (HP制)
         enemy_hits = pygame.sprite.groupcollide(self.enemies, self.bullets, False, True)
@@ -575,8 +578,8 @@ class Game:
             hit_enemies = pygame.sprite.spritecollide(self.player, self.enemies, False)
             hit_bullets = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
             
-            # ウェーブ11以降は被ダメージを倍にする
-            damage_amount = 2 if self.current_wave >= 11 else 1
+            # ウェーブ5以降は被ダメージを増加
+            damage_amount = 2 if self.current_wave >= 5 else 1
 
             if hit_enemies or hit_bullets:
                 if self.player.has_barrier:
@@ -596,12 +599,16 @@ class Game:
             if isinstance(enemy, BigBoss) and enemy.state == "AOE" and current_time > self.player.invincible_timer:
                 dist = math.hypot(self.player.rect.centerx - enemy.rect.centerx, self.player.rect.centery - enemy.rect.centery)
                 if dist < enemy.aoe_range:
-                    self.player.hp -= (2 if self.current_wave >= 11 else 1)
+                    self.player.hp -= (2 if self.current_wave >= 5 else 1)
                     self.player.invincible_timer = current_time + 1000
                     self.game_over = True
 
     def check_enemy_death(self, enemy):
         if enemy.hp <= 0 and enemy.alive():
+            # ボス撃破時に確定でスキル選択を発生させる
+            if isinstance(enemy, (MidBoss, RedMidBoss, BigBoss)):
+                self.trigger_skill_selection()
+
             # 経験値オーブの生成（ボスは多めに）
             orb_count = 5 if isinstance(enemy, (MidBoss, RedMidBoss)) else 15 if isinstance(enemy, BigBoss) else 1
             for _ in range(orb_count):
