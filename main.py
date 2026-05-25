@@ -436,8 +436,8 @@ class Game:
             if dist < 300: # 300ピクセル以内ならスポーンさせない
                 return
 
-        # ウェーブ5以降、5ウェーブごとに体力を100%ずつ増加（2倍, 4倍, 8倍...と倍々になる）
-        hp_multiplier = 2 ** (self.current_wave // 5)
+        # ウェーブ5以降、5ウェーブごとに体力を100%（初期値分）ずつ増加（1倍, 2倍, 3倍, 4倍...）
+        hp_multiplier = 1 + (self.current_wave // 5)
         enemy.hp *= hp_multiplier
         enemy.max_hp *= hp_multiplier
 
@@ -578,8 +578,8 @@ class Game:
             hit_enemies = pygame.sprite.spritecollide(self.player, self.enemies, False)
             hit_bullets = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
             
-            # ウェーブ5以降は被ダメージを増加
-            damage_amount = 2 if self.current_wave >= 5 else 1
+            # ウェーブ5以降、5ウェーブごとに被ダメージを加算
+            damage_amount = 1 + (self.current_wave // 5)
 
             if hit_enemies or hit_bullets:
                 if self.player.has_barrier:
@@ -599,7 +599,7 @@ class Game:
             if isinstance(enemy, BigBoss) and enemy.state == "AOE" and current_time > self.player.invincible_timer:
                 dist = math.hypot(self.player.rect.centerx - enemy.rect.centerx, self.player.rect.centery - enemy.rect.centery)
                 if dist < enemy.aoe_range:
-                    self.player.hp -= (2 if self.current_wave >= 5 else 1)
+                    self.player.hp -= (1 + (self.current_wave // 5))
                     self.player.invincible_timer = current_time + 1000
                     self.game_over = True
 
