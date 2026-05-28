@@ -361,6 +361,7 @@ class ExpOrb(pygame.sprite.Sprite):
 
 class Game:
     def __init__(self):
+        self.game_started = False
         self.reset()
 
     def reset(self):
@@ -376,10 +377,22 @@ class Game:
         self.exp = 0
         self.next_level_exp = 5
 
+        # 音声の初期化
+        try:
+            pygame.mixer.init()
+            self.snd_levelup = pygame.mixer.Sound("levelup.wav")
+            self.snd_select = pygame.mixer.Sound("select.wav")
+            print("Sound files loaded.")
+        except Exception as e:
+            print(f"Sound Error: {e}")
+            print("Note: Please place 'levelup.wav' and 'select.wav' in the same folder.")
+            self.snd_levelup = None
+            self.snd_select = None
+
         # ウェーブ管理の初期化
         self.wave_config = WAVE_CONFIG
         self.current_wave = 1
-        self.wave_duration = 45000  # 45秒
+        self.wave_duration = 40000  # 40秒
         self.wave_start_time = pygame.time.get_ticks()
         self.boss_spawned = False
 
@@ -390,6 +403,7 @@ class Game:
 
         self.game_over = False
         self.level_up_pending = False
+        self.paused = False
         self.skill_choices = []
         self.enemy_spawn_cooldown = 1500
         self.last_enemy_spawn_time = 0
@@ -449,11 +463,29 @@ class Game:
             if event.type == pygame.QUIT:
                 return False
             if event.type == pygame.KEYDOWN:
-                if self.game_over and event.key == pygame.K_r:
-                    self.reset()
+                if not self.game_started:
+                    if event.key == pygame.K_SPACE:
+                        self.game_started = True
+                    return True
+
+                if self.game_over:
+                    if event.key == pygame.K_r:
+                        self.reset()
+                    elif event.key == pygame.K_t: # タイトルへ戻る
+                        self.reset()
+                        self.game_started = False
+                elif not self.level_up_pending:
+                    if event.key == pygame.K_p or event.key == pygame.K_ESCAPE:
+                        self.paused = not self.paused
+                    elif self.paused and event.key == pygame.K_t: # ポーズ中のみタイトルへ戻れる
+                        self.reset()
+                        self.game_started = False
+                        self.paused = False
                 elif self.level_up_pending:
                     if event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
                         idx = event.key - pygame.K_1
+                        if self.snd_select:
+                            self.snd_select.play()
                         self.apply_skill(self.skill_choices[idx])
                         self.level_up_pending = False
         return True
@@ -481,6 +513,8 @@ class Game:
 
     def trigger_skill_selection(self):
         self.level_up_pending = True
+        if self.snd_levelup:
+            self.snd_levelup.play()
         
         # スキル抽選のフィルタリング
         available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
@@ -494,7 +528,7 @@ class Game:
         self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
 
     def update(self):
-        if self.game_over or self.level_up_pending:
+        if not self.game_started or self.game_over or self.level_up_pending or self.paused:
             return
 
         keys = pygame.key.get_pressed()
@@ -666,6 +700,36 @@ class Game:
     def draw(self):
         screen.fill(BLACK)
         
+        if not self.game_started:
+            # タイトル表示 (少し大きめのフォントを使用)
+            title_font = pygame.font.SysFont("msgothic", 100, bold=True)
+            title_text = title_font.render("MY SHOOTING GAME", True, YELLOW)
+            screen.blit(title_text, title_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100)))
+            
+            # スタートを促すテキスト（0.5秒ごとに点滅）
+            if (pygame.time.get_ticks() // 500) % 2 == 0:
+                start_text = font.render("PRESS SPACE TO START", True, WHITE)
+                screen.blit(start_text, start_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50)))
+            
+            # 操作説明ボックス
+            box_rect = pygame.Rect(0, 0, 400, 160)
+            box_rect.center = (WIDTH // 2, HEIGHT // 2 + 220)
+            pygame.draw.rect(screen, (30, 30, 30), box_rect) # 背景
+            pygame.draw.rect(screen, WHITE, box_rect, 2)    # 枠線
+            
+            controls = [
+                "--- CONTROLS ---",
+                "ARROWS : MOVE",
+                "SPACE  : SHOOT",
+                "P / ESC: PAUSE"
+            ]
+            for i, line in enumerate(controls):
+                c_text = small_font.render(line, True, WHITE if i > 0 else ORANGE)
+                screen.blit(c_text, c_text.get_rect(center=(WIDTH // 2, box_rect.top + 30 + i * 35)))
+            
+            pygame.display.update()
+            return
+
         # スプライトの一括描画
         self.exp_orbs.draw(screen)
         self.bullets.draw(screen)
@@ -749,9 +813,34 @@ class Game:
         # レベルアップ画面
         if self.level_up_pending:
             self.draw_overlay("レベルアップ！スキルを選択")
+            
+            box_width = 600
+            box_height = 70
+            gap = 20
+            start_y = HEIGHT // 2 + 20 # 開始位置を少し下げる
+            
             for i, skill in enumerate(self.skill_choices):
-                text = small_font.render(f"{i+1}: {skill_names[skill]}", True, WHITE)
-                screen.blit(text, (WIDTH // 2 - 150, HEIGHT // 2 - 50 + i * 60))
+                # カード（枠）の描画
+                rect = pygame.Rect(0, 0, box_width, box_height)
+                rect.center = (WIDTH // 2, start_y + i * (box_height + gap))
+                
+                # 派手な演出：影と二重枠
+                pygame.draw.rect(screen, (20, 20, 20), rect.move(4, 4)) # 影
+                pygame.draw.rect(screen, (30, 40, 80), rect)            # ボタン背景（濃い青）
+                pygame.draw.rect(screen, YELLOW, rect, 4)               # 金の太枠
+                
+                # テキスト（少し大きく、太字っぽく見えるように白で描画）
+                skill_text = small_font.render(f"PRESS [{i+1}] : {skill_names[skill]}", True, WHITE)
+                screen.blit(skill_text, skill_text.get_rect(center=rect.center))
+
+        # ポーズ画面
+        if self.paused:
+            self.draw_overlay("PAUSED")
+            resume_text = font.render("PRESS P TO RESUME", True, WHITE)
+            resume_rect = resume_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+            screen.blit(resume_text, resume_rect)
+            back_text = small_font.render("PRESS [T] TO RETURN TO TITLE", True, WHITE)
+            screen.blit(back_text, back_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 130)))
 
         # ゲームオーバー画面
         if self.game_over:
@@ -759,6 +848,8 @@ class Game:
             restart_text = font.render("PRESS R TO RESTART", True, WHITE)
             restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
             screen.blit(restart_text, restart_rect)
+            back_text = small_font.render("PRESS [T] TO RETURN TO TITLE", True, WHITE)
+            screen.blit(back_text, back_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 130)))
 
         pygame.display.update()
 
@@ -767,7 +858,7 @@ class Game:
         overlay.fill((0, 0, 0, 180))
         screen.blit(overlay, (0, 0))
         title = font.render(title_str, True, WHITE if not self.game_over else RED)
-        title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+        title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 200)) # タイトルを上に配置
         screen.blit(title, title_rect)
 
 def main():
