@@ -217,7 +217,13 @@ class ShootingEnemy(Enemy):
         if not screen.get_rect().collidepoint(self.rect.center):
             return
         current_time = pygame.time.get_ticks()
-        if current_time - self.last_shot_time > self.shoot_cooldown:
+
+        # HPが半分以下なら射撃速度アップ
+        effective_cooldown = self.shoot_cooldown
+        if self.hp <= self.max_hp / 2:
+            effective_cooldown *= 0.6
+
+        if current_time - self.last_shot_time > effective_cooldown:
             dx = player_pos[0] - self.rect.centerx
             dy = player_pos[1] - self.rect.centery
             dist = math.hypot(dx, dy)
@@ -271,7 +277,8 @@ class RedMidBoss(Enemy):
                 self.rect.y += (dy / dist) * self.speed
                 
         elif self.state == "PAUSE":
-            if current_time - self.state_timer > 1000: # 1秒停止
+            pause_duration = 1000 if self.hp > self.max_hp / 2 else 400 # ピンチ時はタメ短縮
+            if current_time - self.state_timer > pause_duration:
                 self.state = "CHARGE"
                 self.state_timer = current_time
                 dx = player_pos[0] - self.rect.centerx
@@ -331,13 +338,56 @@ class BigBoss(Enemy):
             if abs(dx) > 5:
                 self.rect.x += (dx / abs(dx)) * 0.5
             
-            if current_time - self.aoe_timer > self.charge_duration:
+            charge_time = self.charge_duration if self.hp > self.max_hp / 2 else self.charge_duration / 2
+            if current_time - self.aoe_timer > charge_time:
                 self.state = "AOE"
                 self.aoe_timer = current_time
         
         elif self.state == "AOE":
             if current_time - self.aoe_timer > 600: # 攻撃判定の持続時間
                 self.state = "APPROACH"
+
+class ShootingBigBoss(ShootingEnemy):
+    def __init__(self):
+        super().__init__()
+        self.size = 150
+        self.image = pygame.Surface((self.size, self.size))
+        self.image.fill(MAGENTA)
+        pygame.draw.rect(self.image, (0, 255, 255), self.image.get_rect(), 8) # 水色の枠線で区別
+        self.rect = self.image.get_rect(midbottom=(WIDTH//2, 0))
+        self.hp = 100
+        self.max_hp = 100
+        self.speed = 1.0
+        self.shoot_cooldown = 1500
+
+    def update(self, player_pos):
+        if self.rect.top < 50:
+            self.rect.y += 2
+            return
+        super().update(player_pos)
+
+    def shoot(self, player_pos, enemy_bullets, all_sprites):
+        if not screen.get_rect().collidepoint(self.rect.center):
+            return
+        current_time = pygame.time.get_ticks()
+
+        # HP半分以下で連射速度アップ
+        effective_cooldown = self.shoot_cooldown
+        if self.hp <= self.max_hp / 2:
+            effective_cooldown *= 0.5
+
+        if current_time - self.last_shot_time > effective_cooldown:
+            dx = player_pos[0] - self.rect.centerx
+            dy = player_pos[1] - self.rect.centery
+            dist = math.hypot(dx, dy)
+            if dist != 0:
+                base_angle = math.atan2(dy, dx)
+                for i in range(-2, 3): # 5方向拡散弾
+                    angle = base_angle + math.radians(i * 15)
+                    bullet = EnemyBullet(self.rect.centerx, self.rect.centery, math.cos(angle), math.sin(angle))
+                    enemy_bullets.add(bullet)
+                    all_sprites.add(bullet)
+            self.last_shot_time = current_time
 
 class ExpOrb(pygame.sprite.Sprite):
     def __init__(self, x, y):
@@ -394,7 +444,10 @@ class Game:
         self.current_wave = 1
         self.wave_duration = 40000  # 40秒
         self.wave_start_time = pygame.time.get_ticks()
-        self.boss_spawned = False
+        self.is_boss_wave = False
+        self.bosses_defeated = 0
+        self.wave_announcement_timer = 0
+        self.last_frame_ticks = pygame.time.get_ticks()
 
         # スキル関連の初期化
         self.piercing_count = 0
@@ -412,20 +465,9 @@ class Game:
             self.spawn_enemy()
 
     def spawn_enemy(self):
-        # ボスウェーブの特殊処理
-        is_unique_boss = False
-        if self.current_wave == 5 and not self.boss_spawned:
-            enemy = RedMidBoss()
-            self.boss_spawned = True
-            is_unique_boss = True
-        elif self.current_wave == 10 and not self.boss_spawned:
-            enemy = BigBoss()
-            self.boss_spawned = True
-            is_unique_boss = True
-        elif self.current_wave in [5, 10]:
-            # ボス戦中は雑魚敵を少なくする
-            config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
-            if len(self.enemies) > config["max_enemies"]: return
+        if self.is_boss_wave:
+            # ボス戦中は取り巻きを制限（最大5体）
+            if len(self.enemies) > 5: return
             enemy = Enemy()
         else:
             # 設定データに基づいた重み付き抽選
@@ -443,18 +485,35 @@ class Game:
             else:
                 enemy = Enemy()
 
-        # プレイヤーとの距離チェック（ユニークなボス以外に適用）
-        if not is_unique_boss:
-            dist = math.hypot(enemy.rect.centerx - self.player.rect.centerx, 
-                              enemy.rect.centery - self.player.rect.centery)
-            if dist < 300: # 300ピクセル以内ならスポーンさせない
-                return
+        # プレイヤーとの距離チェック
+        dist = math.hypot(enemy.rect.centerx - self.player.rect.centerx, 
+                          enemy.rect.centery - self.player.rect.centery)
+        if dist < 300: return
 
-        # ウェーブ5以降、5ウェーブごとに体力を100%（初期値分）ずつ増加（1倍, 2倍, 3倍, 4倍...）
-        hp_multiplier = 1 + (self.current_wave // 5)
+        # ステータス上昇（ボス討伐数に応じて強化）
+        hp_multiplier = 1 + self.bosses_defeated
         enemy.hp *= hp_multiplier
         enemy.max_hp *= hp_multiplier
 
+        self.enemies.add(enemy)
+        self.all_sprites.add(enemy)
+
+    def spawn_boss(self):
+        # 討伐数に応じて出現するボスをローテーション
+        boss_index = self.bosses_defeated % 4
+        if boss_index == 0:
+            enemy = RedMidBoss()
+        elif boss_index == 1:
+            enemy = BigBoss()
+        elif boss_index == 2:
+            enemy = MidBoss()
+        else:
+            enemy = ShootingBigBoss()
+        
+        # ボスのステータスも討伐数に応じて強化
+        hp_multiplier = 1 + self.bosses_defeated
+        enemy.hp *= hp_multiplier
+        enemy.max_hp *= hp_multiplier
         self.enemies.add(enemy)
         self.all_sprites.add(enemy)
 
@@ -466,6 +525,9 @@ class Game:
                 if not self.game_started:
                     if event.key == pygame.K_SPACE:
                         self.game_started = True
+                        self.wave_start_time = pygame.time.get_ticks()
+                        self.last_frame_ticks = pygame.time.get_ticks()
+                        self.wave_announcement_timer = pygame.time.get_ticks()
                     return True
 
                 if self.game_over:
@@ -516,33 +578,54 @@ class Game:
         if self.snd_levelup:
             self.snd_levelup.play()
         
-        # スキル抽選のフィルタリング
+        # スキル抽選のフィルタリング（バリア、貫通、回復など）
         available_skills = [s for s in skills if not (s == "barrier" and self.player.has_barrier)]
+        
+        # HPが最大の場合は回復スキルを出現させない
+        if self.player.hp >= self.player.max_hp:
+            available_skills = [s for s in available_skills if s != "heal"]
+            
         # 貫通弾ノックバックの出現条件：貫通弾を1つ以上持っていて、まだノックバックを持っていない
         if self.piercing_count == 0 or self.has_pierce_knockback:
             available_skills = [s for s in available_skills if s != "pierce_knockback"]
-        # 重複取得不可スキルの除外
+            
+        # 重複取得不可スキルの最終チェック
         if self.has_pierce_knockback:
             available_skills = [s for s in available_skills if s != "pierce_knockback"]
 
         self.skill_choices = random.sample(available_skills, min(3, len(available_skills)))
 
     def update(self):
-        if not self.game_started or self.game_over or self.level_up_pending or self.paused:
+        current_time = pygame.time.get_ticks()
+        dt = current_time - self.last_frame_ticks
+        self.last_frame_ticks = current_time
+
+        if not self.game_started or self.game_over:
+            return
+
+        # レベルアップ画面やポーズ画面ではウェーブの残り時間を減らさない（タイマー停止）
+        if self.level_up_pending or self.paused:
+            self.wave_start_time += dt
             return
 
         keys = pygame.key.get_pressed()
-        current_time = pygame.time.get_ticks()
 
         # プレイヤー更新
         self.player.update(keys)
 
         # ウェーブ管理
-        time_in_wave = current_time - self.wave_start_time
-        if time_in_wave > self.wave_duration:
-            self.current_wave += 1
-            self.wave_start_time = current_time
-            self.boss_spawned = False
+        if not self.is_boss_wave:
+            time_in_wave = current_time - self.wave_start_time
+            if time_in_wave > self.wave_duration:
+                # 5ウェーブごとにボスウェーブへ移行
+                if self.current_wave % 5 == 0:
+                    self.is_boss_wave = True
+                    self.spawn_boss()
+                    self.wave_announcement_timer = current_time
+                else:
+                    self.current_wave += 1
+                    self.wave_start_time = current_time
+                    self.wave_announcement_timer = current_time
 
         # 射撃処理
         if keys[pygame.K_SPACE] and current_time - self.player.last_shot_time > self.player.shoot_cooldown:
@@ -612,8 +695,8 @@ class Game:
             hit_enemies = pygame.sprite.spritecollide(self.player, self.enemies, False)
             hit_bullets = pygame.sprite.spritecollide(self.player, self.enemy_bullets, True)
             
-            # ウェーブ5以降、5ウェーブごとに被ダメージを加算
-            damage_amount = 1 + (self.current_wave // 5)
+            # ボス討伐数に応じて被ダメージを加算
+            damage_amount = 1 + self.bosses_defeated
 
             if hit_enemies or hit_bullets:
                 if self.player.has_barrier:
@@ -633,18 +716,25 @@ class Game:
             if isinstance(enemy, BigBoss) and enemy.state == "AOE" and current_time > self.player.invincible_timer:
                 dist = math.hypot(self.player.rect.centerx - enemy.rect.centerx, self.player.rect.centery - enemy.rect.centery)
                 if dist < enemy.aoe_range:
-                    self.player.hp -= (1 + (self.current_wave // 5))
+                    self.player.hp -= (1 + self.bosses_defeated)
                     self.player.invincible_timer = current_time + 1000
                     self.game_over = True
 
     def check_enemy_death(self, enemy):
         if enemy.hp <= 0 and enemy.alive():
             # ボス撃破時に確定でスキル選択を発生させる
-            if isinstance(enemy, (MidBoss, RedMidBoss, BigBoss)):
+            if isinstance(enemy, (MidBoss, RedMidBoss, BigBoss, ShootingBigBoss)):
                 self.trigger_skill_selection()
+                # ボス討伐成功：次のウェーブへ移行し、難易度上昇
+                if self.is_boss_wave:
+                    self.bosses_defeated += 1
+                    self.is_boss_wave = False
+                    self.current_wave += 1
+                    self.wave_start_time = pygame.time.get_ticks()
+                    self.wave_announcement_timer = pygame.time.get_ticks()
 
             # 経験値オーブの生成（ボスは多めに）
-            orb_count = 5 if isinstance(enemy, (MidBoss, RedMidBoss)) else 15 if isinstance(enemy, BigBoss) else 1
+            orb_count = 5 if isinstance(enemy, (MidBoss, RedMidBoss)) else 15 if isinstance(enemy, (BigBoss, ShootingBigBoss)) else 1
             for _ in range(orb_count):
                 rx = enemy.rect.centerx + random.randint(-20, 20)
                 ry = enemy.rect.centery + random.randint(-20, 20)
@@ -698,7 +788,12 @@ class Game:
                     self.all_sprites.add(p_bullet)
 
     def draw(self):
-        screen.fill(BLACK)
+        # ウェーブに応じた背景色の計算 (HSLAを使用)
+        # ウェーブごとに色相(Hue)を30度ずつずらし、暗めの色にする
+        bg_color = pygame.Color(0, 0, 0)
+        hue = (self.current_wave * 30) % 360
+        bg_color.hsla = (hue, 15, 8, 100) # 彩度15%, 輝度8%
+        screen.fill(bg_color)
         
         if not self.game_started:
             # タイトル表示 (少し大きめのフォントを使用)
@@ -737,17 +832,39 @@ class Game:
         self.enemy_bullets.draw(screen)
         self.enemies.draw(screen)
 
+        # ウェーブ開始のデカ文字演出
+        current_time = pygame.time.get_ticks()
+        announce_duration = 2000 # 2秒間表示
+        if self.game_started and not self.game_over and current_time - self.wave_announcement_timer < announce_duration:
+            # 徐々に透明にする（フェードアウト風）
+            alpha = 255 - int(255 * ((current_time - self.wave_announcement_timer) / announce_duration))
+            wave_start_font = pygame.font.SysFont("msgothic", 120, bold=True)
+            
+            if self.is_boss_wave:
+                msg = "BOSS WAVE START!"
+                color = RED
+            else:
+                msg = f"WAVE {self.current_wave} START!"
+                color = YELLOW
+                
+            wave_start_text = wave_start_font.render(msg, True, color)
+            wave_start_text.set_alpha(alpha)
+            text_rect = wave_start_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+            screen.blit(wave_start_text, text_rect)
+
         # ボスのHPバー描画
         for enemy in self.enemies:
-            if isinstance(enemy, BigBoss):
+            if isinstance(enemy, (BigBoss, ShootingBigBoss)):
                 hp_ratio = max(0, enemy.hp / enemy.max_hp)
                 bar_w, bar_h = 800, 20
                 bar_x = (WIDTH - bar_w) // 2
                 bar_y = 40
                 pygame.draw.rect(screen, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
-                pygame.draw.rect(screen, MAGENTA, (bar_x, bar_y, int(bar_w * hp_ratio), bar_h))
+                bar_color = MAGENTA if isinstance(enemy, BigBoss) else (0, 200, 200)
+                pygame.draw.rect(screen, bar_color, (bar_x, bar_y, int(bar_w * hp_ratio), bar_h))
                 pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
-                boss_text = small_font.render("GREAT BOSS", True, WHITE)
+                boss_name = "GREAT BOSS" if isinstance(enemy, BigBoss) else "ANCIENT SENTRY"
+                boss_text = small_font.render(boss_name, True, WHITE)
                 screen.blit(boss_text, (bar_x, bar_y - 25))
                 hp_num = small_font.render(f"{enemy.hp} / {enemy.max_hp}", True, WHITE)
                 screen.blit(hp_num, (bar_x + bar_w - 100, bar_y - 25))
@@ -759,7 +876,8 @@ class Game:
                         pygame.draw.circle(screen, RED, enemy.rect.center, enemy.aoe_range, 3)
                     # 溜めの進捗に合わせて円の太さを変えるなどの演出
                     progress = (pygame.time.get_ticks() - enemy.aoe_timer) / enemy.charge_duration
-                    pygame.draw.circle(screen, RED, enemy.rect.center, int(enemy.aoe_range * progress), 1)
+                    if progress <= 1.0:
+                        pygame.draw.circle(screen, RED, enemy.rect.center, int(enemy.aoe_range * progress), 1)
                 
                 # 攻撃瞬間のエフェクト
                 elif enemy.state == "AOE":
@@ -801,9 +919,12 @@ class Game:
         player_hp_text = small_font.render(f"HP: {self.player.hp}/{self.player.max_hp}", True, RED if self.player.hp <= 1 else WHITE)
         wave_text = small_font.render(f"WAVE {self.current_wave}", True, WHITE)
         
-        # 次のウェーブまでの残り時間
-        remaining_time = max(0, (self.wave_duration - (pygame.time.get_ticks() - self.wave_start_time)) // 1000)
-        timer_text = small_font.render(f"NEXT WAVE: {remaining_time}s", True, WHITE)
+        if self.is_boss_wave:
+            timer_text = small_font.render("STATUS: BOSS BATTLE", True, RED)
+        else:
+            # 次のウェーブまでの残り時間
+            remaining_time = max(0, (self.wave_duration - (pygame.time.get_ticks() - self.wave_start_time)) // 1000)
+            timer_text = small_font.render(f"NEXT WAVE: {remaining_time}s", True, WHITE)
         
         screen.blit(level_text, (10, HEIGHT - UI_HEIGHT + 2))
         screen.blit(player_hp_text, (150, HEIGHT - UI_HEIGHT + 2))
