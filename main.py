@@ -2,10 +2,21 @@ import pygame
 import sys
 import random
 import math
+import os
 
+# 音声の遅延対策と初期化設定（pygame.initの前に呼ぶのが推奨）
+pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 
 # =====================================
+# アプリ化用のパス解決関数
+# =====================================
+def resource_path(relative_path):
+    """ 実行ファイルにした際のリソースパスを解決する """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 # 設定・定数
 # =====================================
 WIDTH = 1280
@@ -90,16 +101,22 @@ class Player(pygame.sprite.Sprite):
         self.has_barrier = False
         self.atk_multiplier = 1.0
         self.pickup_range = 100
+        self.pos = pygame.Vector2(self.rect.center)
 
-    def update(self, keys):
-        if keys[pygame.K_LEFT] and self.rect.left > 0:
-            self.rect.x -= self.speed
-        if keys[pygame.K_RIGHT] and self.rect.right < WIDTH:
-            self.rect.x += self.speed
-        if keys[pygame.K_UP] and self.rect.top > 0:
-            self.rect.y -= self.speed
-        if keys[pygame.K_DOWN] and self.rect.bottom < HEIGHT - XP_BAR_HEIGHT:
-            self.rect.y += self.speed
+    def update(self, keys, dt):
+        direction = pygame.Vector2(0, 0)
+        if keys[pygame.K_LEFT]: direction.x -= 1
+        if keys[pygame.K_RIGHT]: direction.x += 1
+        if keys[pygame.K_UP]: direction.y -= 1
+        if keys[pygame.K_DOWN]: direction.y += 1
+
+        if direction.length() > 0:
+            direction = direction.normalize()
+            self.pos += direction * self.speed * (dt / 16.67) # 60fpsベースで調整
+            
+        self.rect.centerx = max(self.size//2, min(WIDTH - self.size//2, self.pos.x))
+        self.rect.centery = max(self.size//2, min(HEIGHT - XP_BAR_HEIGHT - self.size//2, self.pos.y))
+        self.pos.xy = self.rect.center
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y, dx, dy):
@@ -111,9 +128,9 @@ class Bullet(pygame.sprite.Sprite):
         self.dy = dy
         self.speed = 8
 
-    def update(self):
-        self.rect.x += self.dx * self.speed
-        self.rect.y += self.dy * self.speed
+    def update(self, dt):
+        self.rect.x += self.dx * self.speed * (dt / 16.67)
+        self.rect.y += self.dy * self.speed * (dt / 16.67)
         # 画面外に出たら消去
         if (self.rect.x < -100 or self.rect.x > WIDTH + 100 or 
             self.rect.y < -100 or self.rect.y > HEIGHT + 100):
@@ -129,9 +146,9 @@ class EnemyBullet(pygame.sprite.Sprite):
         self.dy = dy
         self.speed = 5
 
-    def update(self):
-        self.rect.x += self.dx * self.speed
-        self.rect.y += self.dy * self.speed
+    def update(self, dt):
+        self.rect.x += self.dx * self.speed * (dt / 16.67)
+        self.rect.y += self.dy * self.speed * (dt / 16.67)
         if not screen.get_rect().inflate(200, 200).contains(self.rect):
             self.kill()
 
@@ -147,9 +164,9 @@ class PiercingBullet(pygame.sprite.Sprite):
         self.speed = 12
         self.hit_enemies = set() # すでに当たった敵を記録
 
-    def update(self):
-        self.rect.x += self.dx * self.speed
-        self.rect.y += self.dy * self.speed
+    def update(self, dt):
+        self.rect.x += self.dx * self.speed * (dt / 16.67)
+        self.rect.y += self.dy * self.speed * (dt / 16.67)
         if not screen.get_rect().inflate(200, 200).contains(self.rect):
             self.kill()
 
@@ -175,13 +192,13 @@ class Enemy(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(topleft=(x, y))
         self.speed = 1.5
 
-    def update(self, player_pos):
+    def update(self, player_pos, dt):
         dx = player_pos[0] - self.rect.centerx
         dy = player_pos[1] - self.rect.centery
         dist = math.hypot(dx, dy)
         if dist != 0:
-            self.rect.x += (dx / dist) * self.speed
-            self.rect.y += (dy / dist) * self.speed
+            self.rect.x += (dx / dist) * self.speed * (dt / 16.67)
+            self.rect.y += (dy / dist) * self.speed * (dt / 16.67)
 
 class HeavyEnemy(Enemy):
     def __init__(self):
@@ -262,8 +279,9 @@ class RedMidBoss(Enemy):
         self.state_timer = 0
         self.charge_dir = (0, 0)
 
-    def update(self, player_pos):
+    def update(self, player_pos, dt):
         current_time = pygame.time.get_ticks()
+        move_factor = dt / 16.67
         
         if self.state == "APPROACH":
             dx = player_pos[0] - self.rect.centerx
@@ -273,8 +291,8 @@ class RedMidBoss(Enemy):
                 self.state = "PAUSE"
                 self.state_timer = current_time
             elif dist != 0:
-                self.rect.x += (dx / dist) * self.speed
-                self.rect.y += (dy / dist) * self.speed
+                self.rect.x += (dx / dist) * self.speed * move_factor
+                self.rect.y += (dy / dist) * self.speed * move_factor
                 
         elif self.state == "PAUSE":
             pause_duration = 1000 if self.hp > self.max_hp / 2 else 400 # ピンチ時はタメ短縮
@@ -288,8 +306,8 @@ class RedMidBoss(Enemy):
                     self.charge_dir = (dx / dist, dy / dist)
                     
         elif self.state == "CHARGE":
-            self.rect.x += self.charge_dir[0] * self.charge_speed
-            self.rect.y += self.charge_dir[1] * self.charge_speed
+            self.rect.x += self.charge_dir[0] * self.charge_speed * move_factor
+            self.rect.y += self.charge_dir[1] * self.charge_speed * move_factor
             if current_time - self.state_timer > 800: # 0.8秒間突進
                 self.state = "APPROACH"
 
@@ -309,8 +327,9 @@ class BigBoss(Enemy):
         self.aoe_range = 350
         self.charge_duration = 2000 # 2秒溜める
 
-    def update(self, player_pos):
+    def update(self, player_pos, dt):
         current_time = pygame.time.get_ticks()
+        move_factor = dt / 16.67
 
         # 初期入場
         if self.rect.top < 50:
@@ -324,8 +343,8 @@ class BigBoss(Enemy):
         if self.state == "APPROACH":
             # プレイヤーに向かってゆっくりタックル移動
             if dist != 0:
-                self.rect.x += (dx / dist) * self.speed
-                self.rect.y += (dy / dist) * self.speed
+                self.rect.x += (dx / dist) * self.speed * move_factor
+                self.rect.y += (dy / dist) * self.speed * move_factor
             
             # 一定距離内に入ったら範囲攻撃の準備へ
             if dist < 220:
@@ -336,7 +355,7 @@ class BigBoss(Enemy):
             # 溜め期間中は少しだけプレイヤーの方へ向き直るが移動は制限
             dx = player_pos[0] - self.rect.centerx
             if abs(dx) > 5:
-                self.rect.x += (dx / abs(dx)) * 0.5
+                self.rect.x += (dx / abs(dx)) * 0.5 * move_factor
             
             charge_time = self.charge_duration if self.hp > self.max_hp / 2 else self.charge_duration / 2
             if current_time - self.aoe_timer > charge_time:
@@ -360,11 +379,11 @@ class ShootingBigBoss(ShootingEnemy):
         self.speed = 1.0
         self.shoot_cooldown = 1500
 
-    def update(self, player_pos):
+    def update(self, player_pos, dt):
         if self.rect.top < 50:
             self.rect.y += 2
             return
-        super().update(player_pos)
+        super().update(player_pos, dt)
 
     def shoot(self, player_pos, enemy_bullets, all_sprites):
         if not screen.get_rect().collidepoint(self.rect.center):
@@ -397,13 +416,13 @@ class ExpOrb(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.value = 1
 
-    def update(self, player_pos, pickup_range):
+    def update(self, player_pos, pickup_range, dt):
         dx = player_pos[0] - self.rect.centerx
         dy = player_pos[1] - self.rect.centery
         dist = math.hypot(dx, dy)
         if dist < pickup_range and dist != 0:
-            self.rect.x += (dx / dist) * 5
-            self.rect.y += (dy / dist) * 5
+            self.rect.x += (dx / dist) * 5 * (dt / 16.67)
+            self.rect.y += (dy / dist) * 5 * (dt / 16.67)
 
 # =====================================
 # ゲーム管理クラス
@@ -429,15 +448,23 @@ class Game:
 
         # 音声の初期化
         try:
-            pygame.mixer.init()
-            self.snd_levelup = pygame.mixer.Sound("levelup.wav")
-            self.snd_select = pygame.mixer.Sound("select.wav")
-            print("Sound files loaded.")
-        except Exception as e:
-            print(f"Sound Error: {e}")
-            print("Note: Please place 'levelup.wav' and 'select.wav' in the same folder.")
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            
+            # ファイルの存在を確認して読み込み
             self.snd_levelup = None
             self.snd_select = None
+            
+            if os.path.exists(resource_path("levelup.wav")):
+                self.snd_levelup = pygame.mixer.Sound(resource_path("levelup.wav"))
+                self.snd_levelup.set_volume(0.5) # 音量を50%に設定
+            if os.path.exists(resource_path("select.wav")):
+                self.snd_select = pygame.mixer.Sound(resource_path("select.wav"))
+                self.snd_select.set_volume(0.5)
+                
+            print(f"Audio Initialized: LevelUp={bool(self.snd_levelup)}, Select={bool(self.snd_select)}")
+        except Exception as e:
+            print(f"Sound Error: {e}")
 
         # ウェーブ管理の初期化
         self.wave_config = WAVE_CONFIG
@@ -448,6 +475,7 @@ class Game:
         self.bosses_defeated = 0
         self.wave_announcement_timer = 0
         self.last_frame_ticks = pygame.time.get_ticks()
+        self.screen_shake = 0
 
         # スキル関連の初期化
         self.piercing_count = 0
@@ -524,6 +552,9 @@ class Game:
             if event.type == pygame.KEYDOWN:
                 if not self.game_started:
                     if event.key == pygame.K_SPACE:
+                        # ゲーム開始時に音を鳴らして確認できるようにする
+                        if self.snd_select:
+                            self.snd_select.play()
                         self.game_started = True
                         self.wave_start_time = pygame.time.get_ticks()
                         self.last_frame_ticks = pygame.time.get_ticks()
@@ -539,6 +570,11 @@ class Game:
                 elif not self.level_up_pending:
                     if event.key == pygame.K_p or event.key == pygame.K_ESCAPE:
                         self.paused = not self.paused
+                    elif self.paused and event.key == pygame.K_r: # ポーズ中にリトライ
+                        if self.snd_select:
+                            self.snd_select.play()
+                        self.reset()
+                        self.paused = False
                     elif self.paused and event.key == pygame.K_t: # ポーズ中のみタイトルへ戻れる
                         self.reset()
                         self.game_started = False
@@ -611,7 +647,7 @@ class Game:
         keys = pygame.key.get_pressed()
 
         # プレイヤー更新
-        self.player.update(keys)
+        self.player.update(keys, dt)
 
         # ウェーブ管理
         if not self.is_boss_wave:
@@ -638,15 +674,15 @@ class Game:
             self.last_piercing_time = current_time
 
         # 敵・弾・経験値オーブ更新
-        self.enemies.update(self.player.rect.center)
+        self.enemies.update(self.player.rect.center, dt)
         for enemy in self.enemies:
             if isinstance(enemy, ShootingEnemy) and not isinstance(enemy, BigBoss):
                 enemy.shoot(self.player.rect.center, self.enemy_bullets, self.all_sprites)
 
-        self.bullets.update()
-        self.piercing_bullets.update()
-        self.enemy_bullets.update()
-        self.exp_orbs.update(self.player.rect.center, self.player.pickup_range)
+        self.bullets.update(dt)
+        self.piercing_bullets.update(dt)
+        self.enemy_bullets.update(dt)
+        self.exp_orbs.update(self.player.rect.center, self.player.pickup_range, dt)
 
         # 敵生成 (ウェーブ設定を使用)
         config = self.wave_config.get(self.current_wave, DEFAULT_WAVE_SETTING)
@@ -706,6 +742,7 @@ class Game:
 
                 self.player.hp -= damage_amount
                 self.player.invincible_timer = current_time + 1000 # 1秒の無敵
+                self.screen_shake = 15 # 被弾時に画面を揺らす
                 
                 # ダメージ時の視覚効果（点滅の代わりに一瞬赤くするなど、ここでは簡易的に）
                 if self.player.hp <= 0:
@@ -718,6 +755,7 @@ class Game:
                 if dist < enemy.aoe_range:
                     self.player.hp -= (1 + self.bosses_defeated)
                     self.player.invincible_timer = current_time + 1000
+                    self.screen_shake = 20
                     self.game_over = True
 
     def check_enemy_death(self, enemy):
@@ -790,11 +828,21 @@ class Game:
     def draw(self):
         # ウェーブに応じた背景色の計算 (HSLAを使用)
         # ウェーブごとに色相(Hue)を30度ずつずらし、暗めの色にする
+        
+        # スクリーンシェイクの計算
+        offset = pygame.Vector2(0, 0)
+        if self.screen_shake > 0:
+            offset.x = random.randint(-self.screen_shake, self.screen_shake)
+            offset.y = random.randint(-self.screen_shake, self.screen_shake)
+            self.screen_shake = max(0, self.screen_shake - 1)
+
+        display_surface = pygame.Surface((WIDTH, HEIGHT))
         bg_color = pygame.Color(0, 0, 0)
         hue = (self.current_wave * 30) % 360
         bg_color.hsla = (hue, 15, 8, 100) # 彩度15%, 輝度8%
-        screen.fill(bg_color)
+        display_surface.fill(bg_color)
         
+        screen.fill(bg_color)
         if not self.game_started:
             # タイトル表示 (少し大きめのフォントを使用)
             title_font = pygame.font.SysFont("msgothic", 100, bold=True)
@@ -826,11 +874,11 @@ class Game:
             return
 
         # スプライトの一括描画
-        self.exp_orbs.draw(screen)
-        self.bullets.draw(screen)
-        self.piercing_bullets.draw(screen)
-        self.enemy_bullets.draw(screen)
-        self.enemies.draw(screen)
+        self.exp_orbs.draw(display_surface)
+        self.bullets.draw(display_surface)
+        self.piercing_bullets.draw(display_surface)
+        self.enemy_bullets.draw(display_surface)
+        self.enemies.draw(display_surface)
 
         # ウェーブ開始のデカ文字演出
         current_time = pygame.time.get_ticks()
@@ -850,7 +898,7 @@ class Game:
             wave_start_text = wave_start_font.render(msg, True, color)
             wave_start_text.set_alpha(alpha)
             text_rect = wave_start_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
-            screen.blit(wave_start_text, text_rect)
+            display_surface.blit(wave_start_text, text_rect)
 
         # ボスのHPバー描画
         for enemy in self.enemies:
@@ -859,34 +907,34 @@ class Game:
                 bar_w, bar_h = 800, 20
                 bar_x = (WIDTH - bar_w) // 2
                 bar_y = 40
-                pygame.draw.rect(screen, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
+                pygame.draw.rect(display_surface, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
                 bar_color = MAGENTA if isinstance(enemy, BigBoss) else (0, 200, 200)
-                pygame.draw.rect(screen, bar_color, (bar_x, bar_y, int(bar_w * hp_ratio), bar_h))
-                pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
+                pygame.draw.rect(display_surface, bar_color, (bar_x, bar_y, int(bar_w * hp_ratio), bar_h))
+                pygame.draw.rect(display_surface, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
                 boss_name = "GREAT BOSS" if isinstance(enemy, BigBoss) else "ANCIENT SENTRY"
                 boss_text = small_font.render(boss_name, True, WHITE)
-                screen.blit(boss_text, (bar_x, bar_y - 25))
+                display_surface.blit(boss_text, (bar_x, bar_y - 25))
                 hp_num = small_font.render(f"{enemy.hp} / {enemy.max_hp}", True, WHITE)
-                screen.blit(hp_num, (bar_x + bar_w - 100, bar_y - 25))
+                display_surface.blit(hp_num, (bar_x + bar_w - 100, bar_y - 25))
                 
                 # 近接攻撃の予兆描画
                 if enemy.state == "PREPARING_AOE":
                     # 赤い円で範囲を表示（点滅させる）
                     if (pygame.time.get_ticks() // 200) % 2 == 0:
-                        pygame.draw.circle(screen, RED, enemy.rect.center, enemy.aoe_range, 3)
+                        pygame.draw.circle(display_surface, RED, enemy.rect.center, enemy.aoe_range, 3)
                     # 溜めの進捗に合わせて円の太さを変えるなどの演出
                     progress = (pygame.time.get_ticks() - enemy.aoe_timer) / enemy.charge_duration
                     if progress <= 1.0:
-                        pygame.draw.circle(screen, RED, enemy.rect.center, int(enemy.aoe_range * progress), 1)
+                        pygame.draw.circle(display_surface, RED, enemy.rect.center, int(enemy.aoe_range * progress), 1)
                 
                 # 攻撃瞬間のエフェクト
                 elif enemy.state == "AOE":
-                    pygame.draw.circle(screen, MAGENTA, enemy.rect.center, enemy.aoe_range, 10)
+                    pygame.draw.circle(display_surface, MAGENTA, enemy.rect.center, enemy.aoe_range, 10)
             
             elif enemy.max_hp > 1:
                 # 中ボスや耐久力の高い敵（オレンジなど）のHPバー描画
                 hp_ratio = max(0, enemy.hp / enemy.max_hp)
-                pygame.draw.rect(screen, BLACK, (enemy.rect.x, enemy.rect.y - 12, enemy.size, 6))
+                pygame.draw.rect(display_surface, BLACK, (enemy.rect.x, enemy.rect.y - 12, enemy.size, 6))
                 if isinstance(enemy, MidBoss):
                     bar_color = YELLOW
                 elif isinstance(enemy, RedMidBoss):
@@ -896,19 +944,22 @@ class Game:
                 
                 # 赤色の中ボスが突進準備中の場合、予告線を描画
                 if isinstance(enemy, RedMidBoss) and enemy.state == "PAUSE":
-                    pygame.draw.line(screen, RED, enemy.rect.center, self.player.rect.center, 2)
+                    pygame.draw.line(display_surface, RED, enemy.rect.center, self.player.rect.center, 2)
 
-                pygame.draw.rect(screen, bar_color, (enemy.rect.x, enemy.rect.y - 12, int(enemy.size * hp_ratio), 6))
+                pygame.draw.rect(display_surface, bar_color, (enemy.rect.x, enemy.rect.y - 12, int(enemy.size * hp_ratio), 6))
                 hp_num = small_font.render(f"{enemy.hp}", True, WHITE)
-                screen.blit(hp_num, (enemy.rect.x, enemy.rect.y - 30))
+                display_surface.blit(hp_num, (enemy.rect.x, enemy.rect.y - 30))
 
         # プレイヤー描画 (無敵時間は点滅させる)
         if pygame.time.get_ticks() > self.player.invincible_timer or (pygame.time.get_ticks() // 100) % 2 == 0:
-            screen.blit(self.player.image, self.player.rect)
+            display_surface.blit(self.player.image, self.player.rect)
             # バリアの視覚効果
             if self.player.has_barrier:
                 barrier_color = (100, 200, 255, 150) # 水色（半透明っぽく見せるための色）
-                pygame.draw.circle(screen, barrier_color, self.player.rect.center, self.player.size, 2)
+                pygame.draw.circle(display_surface, barrier_color, self.player.rect.center, self.player.size, 2)
+
+        # スクリーンシェイク適用してメインスクリーンへ転送
+        screen.blit(display_surface, offset)
 
         # UI: 経験値バー
         pygame.draw.rect(screen, DARK_GRAY, (0, HEIGHT - UI_HEIGHT, WIDTH, UI_HEIGHT))
@@ -958,10 +1009,12 @@ class Game:
         if self.paused:
             self.draw_overlay("PAUSED")
             resume_text = font.render("PRESS P TO RESUME", True, WHITE)
-            resume_rect = resume_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+            resume_rect = resume_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 30))
             screen.blit(resume_text, resume_rect)
+            retry_text = small_font.render("PRESS [R] TO RETRY", True, WHITE)
+            screen.blit(retry_text, retry_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 100)))
             back_text = small_font.render("PRESS [T] TO RETURN TO TITLE", True, WHITE)
-            screen.blit(back_text, back_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 130)))
+            screen.blit(back_text, back_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 140)))
 
         # ゲームオーバー画面
         if self.game_over:
