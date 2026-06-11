@@ -63,14 +63,14 @@ skill_names = {
 WAVE_CONFIG = {
     1: {"max_enemies": 12, "spawn_interval": 1200, "weights": {"Enemy": 1.0}},
     2: {"max_enemies": 15, "spawn_interval": 1100, "weights": {"Enemy": 1.0}},
-    3: {"max_enemies": 18, "spawn_interval": 1000, "weights": {"Enemy": 1.0}},
-    4: {"max_enemies": 22, "spawn_interval": 900,  "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
-    5: {"max_enemies": 8,  "spawn_interval": 1500, "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
-    6: {"max_enemies": 20, "spawn_interval": 1000, "weights": {"Enemy": 0.4, "HeavyEnemy": 0.3, "ShootingEnemy": 0.3}},
-    7: {"max_enemies": 25, "spawn_interval": 800,  "weights": {"Enemy": 0.3, "HeavyEnemy": 0.4, "ShootingEnemy": 0.3}},
+    3: {"max_enemies": 25, "spawn_interval": 800,  "weights": {"Enemy": 1.0}},
+    4: {"max_enemies": 30, "spawn_interval": 700,  "weights": {"Enemy": 0.7, "HeavyEnemy": 0.3}},
+    5: {"max_enemies": 35, "spawn_interval": 600,  "weights": {"Enemy": 0.6, "HeavyEnemy": 0.4}},
+    6: {"max_enemies": 20, "spawn_interval": 1000, "weights": {"Enemy": 0.5, "HeavyEnemy": 0.35, "ShootingEnemy": 0.15}},
+    7: {"max_enemies": 25, "spawn_interval": 800,  "weights": {"Enemy": 0.4, "HeavyEnemy": 0.45, "ShootingEnemy": 0.15}},
     # 以降はDEFAULT_WAVE_SETTINGを適用
 }
-DEFAULT_WAVE_SETTING = {"max_enemies": 30, "spawn_interval": 600, "weights": {"Enemy": 0.2, "HeavyEnemy": 0.4, "ShootingEnemy": 0.4}}
+DEFAULT_WAVE_SETTING = {"max_enemies": 30, "spawn_interval": 600, "weights": {"Enemy": 0.3, "HeavyEnemy": 0.5, "ShootingEnemy": 0.2}}
 
 
 
